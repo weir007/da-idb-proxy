@@ -1,0 +1,194 @@
+import requests
+import json
+import uuid
+import io
+
+# 配置信息
+BASE_URL = "http://127.0.0.1:8090/api/v1"
+TEST_REALM = f"realm-{uuid.uuid4().hex[:6]}"  # 生成随机名避免冲突
+SAML_ALIAS = "saml-idp-test"
+
+
+class KeycloakWrapperTester:
+    def __init__(self):
+        self.session = requests.Session()
+        # 核心：禁用系统代理环境变量，解决公司内网拦截问题
+        self.session.trust_env = False
+        self.base_url = BASE_URL
+        # --- 新增计数器 ---
+        self.total_count = 0  # 已运行实例数
+        self.passed_count = 0  # 通过实例数
+        self.failed_cases = []  # 记录失败的案例名，方便回溯
+
+    def log(self, step_name, res):
+        self.total_count += 1
+        status = res.status_code
+
+        # 成功的定义：200, 201, 204 都算通
+        if 200 <= status < 300:
+            self.passed_count += 1
+            print(f"✅ [PASS] {step_name} - Status: {status}")
+        else:
+            self.failed_cases.append(step_name)
+            print(f"❌ [FAIL] {step_name} - Status: {status}")
+            print(f"   Response: {res.text[:200]}")  # 打印前200个字符的错误信息
+
+    def print_summary(self):
+        """打印最终测试报告"""
+        print("\n" + "=" * 40)
+        print("         TEST SUMMARY REPORT")
+        print("=" * 40)
+        print(f"Total Instances Run: {self.total_count}")
+        print(f"Passed Instances:    {self.passed_count}")
+        print(f"Failed Instances:    {len(self.failed_cases)}")
+
+        success_rate = (self.passed_count / self.total_count * 100) if self.total_count > 0 else 0
+        print(f"Success Rate:        {success_rate:.2f}%")
+
+        if self.failed_cases:
+            print("-" * 20)
+            print("Failed Steps List:")
+            for case in self.failed_cases:
+                print(f"  - {case}")
+        print("=" * 40 + "\n")
+
+    # --- 1. 租户管理场景 ---
+    def test_tenant_management(self):
+        print("\n=== [场景 1: 租户管理] ===")
+        # 创建
+        payload = {"realm": TEST_REALM, "displayName": "自动化测试租户"}
+        res = self.session.post(f"{self.base_url}/tenants", json=payload)
+        self.log("创建租户", res)
+
+        # 列表
+        res = self.session.get(f"{self.base_url}/tenants")
+        self.log("查看租户列表", res)
+
+    # --- 2. 角色管理场景 (带 Attributes) ---
+    def test_role_management(self):
+        print("\n=== [场景 2: 角色管理] ===")
+        role_name = "test_business_role"
+
+        # 创建角色
+        payload = {
+            "name": role_name,
+            "description": "测试用角色说明",
+            "attributes": {"level": ["gold"], "region": ["asia"]}
+        }
+        res = self.session.post(f"{self.base_url}/{TEST_REALM}/roles", json=payload)
+        self.log("添加角色", res)
+
+        # 获取角色详情
+        res = self.session.get(f"{self.base_url}/{TEST_REALM}/roles/{role_name}")
+        self.log("查看指定角色信息", res)
+
+        # 更新角色属性
+        update_payload = {
+            "attributes": {"level": ["platinum"], "region": ["asia"], "tag": ["new"]}
+        }
+        res = self.session.put(f"{self.base_url}/{TEST_REALM}/roles/{role_name}", json=update_payload)
+        self.log("更新角色属性", res)
+
+        # 删除角色
+        res = self.session.delete(f"{self.base_url}/{TEST_REALM}/roles/{role_name}")
+        self.log("删除角色", res)
+
+    # --- 3. IDP 管理场景 ---
+    def test_idp_management(self):
+        print("\n=== [场景 3: IDP 管理] ===")
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+                <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="http://mock-idp">
+                    <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+                        <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://mock-idp/sso"/>
+                    </IDPSSODescriptor>
+                </EntityDescriptor>"""
+
+        files = {'file': ('metadata.xml', io.BytesIO(xml_content.encode('utf-8')), 'text/xml')}
+        res = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/import", files=files)
+        self.log("导入SAML配置", res)
+
+        if res.status_code == 200:
+            parsed_config = res.json()
+            idp_payload = {
+                "alias": SAML_ALIAS,
+                "providerId": "saml",
+                "enabled": True,
+                "config": parsed_config
+            }
+            res = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/instances", json=idp_payload)
+            self.log("创建SAML实例", res)
+
+            if res.status_code == 200:
+                get_res = self.session.get(f"{self.base_url}/{TEST_REALM}/idp/saml/instances")
+                self.log("查询IDP列表", get_res)
+
+                del_res = self.session.delete(f"{self.base_url}/{TEST_REALM}/idp/saml/instances/{SAML_ALIAS}")
+                self.log("删除SAML实例", del_res)
+
+    # --- 4. 群组与用户管理场景 (补全了增删改) ---
+    def test_group_and_user_management(self):
+        print("\n=== [场景 4: 群组与用户管理] ===")
+        group_name = "test_engineering_group"
+
+        # 1. 创建群组
+        res = self.session.post(f"{self.base_url}/{TEST_REALM}/groups", json={"name": group_name})
+        self.log("创建群组", res)
+
+        # 2. 获取群组列表并提取 ID
+        res = self.session.get(f"{self.base_url}/{TEST_REALM}/groups")
+        self.log("查看群组列表", res)
+
+        group_id = None
+        if res.status_code == 200:
+            groups = res.json()
+            target = next((g for g in groups if g['name'] == group_name), None)
+            if target:
+                group_id = target['id']
+
+        if group_id:
+            # 3. 更新群组 (修改属性)
+            update_payload = {"name": group_name, "attributes": {"dept_code": ["1024"]}}
+            res = self.session.put(f"{self.base_url}/{TEST_REALM}/groups/{group_id}", json=update_payload)
+            self.log("更新群组属性", res)
+
+            # 4. 删除群组
+            res = self.session.delete(f"{self.base_url}/{TEST_REALM}/groups/{group_id}")
+            self.log("删除群组", res)
+
+        # 5. 查看用户列表
+        res = self.session.get(f"{self.base_url}/{TEST_REALM}/users")
+        self.log("查看用户列表", res)
+
+    # --- 5. 清理租户 ---
+    def cleanup(self):
+        print("\n=== [清理: 删除租户] ===")
+        res = self.session.delete(f"{self.base_url}/tenants/{TEST_REALM}")
+        self.log("删除测试租户", res)
+
+    # --- 6. 导出 OpenAPI ---
+    def test_export_spec(self):
+        print("\n=== [场景 5: 导出定义文件] ===")
+        res = self.session.get(f"{self.base_url}/export-spec")
+        self.log("获取OpenAPI定义", res)
+        if res.status_code == 200:
+            with open("keycloak_api_spec.json", "w", encoding="utf-8") as f:
+                json.dump(res.json(), f, indent=2, ensure_ascii=False)
+            print("OpenAPI JSON 已导出至当前目录")
+
+
+def run_all():
+    tester = KeycloakWrapperTester()
+    try:
+        tester.test_tenant_management()
+        tester.test_role_management()
+        tester.test_idp_management()
+        tester.test_group_and_user_management()  # 调用补全后的方法
+        tester.test_export_spec()
+    finally:
+        # 无论成功失败，尝试清理环境
+        tester.cleanup()
+        tester.print_summary()
+
+
+if __name__ == "__main__":
+    run_all()
