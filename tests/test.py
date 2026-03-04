@@ -93,37 +93,67 @@ class KeycloakWrapperTester:
         res = self.session.delete(f"{self.base_url}/{TEST_REALM}/roles/{role_name}")
         self.log("删除角色", res)
 
-    # --- 3. IDP 管理场景 ---
+    # --- 3. IDP 管理场景 (适配单实例限制与 PUT 接口) ---
     def test_idp_management(self):
-        print("\n=== [场景 3: IDP 管理] ===")
-        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
-                <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="http://mock-idp">
-                    <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
-                        <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://mock-idp/sso"/>
-                    </IDPSSODescriptor>
-                </EntityDescriptor>"""
+        print("\n=== [场景 3: IDP 管理 (单实例限制与更新)] ===")
 
-        files = {'file': ('metadata.xml', io.BytesIO(xml_content.encode('utf-8')), 'text/xml')}
-        res = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/import", files=files)
-        self.log("导入SAML配置", res)
-
-        if res.status_code == 200:
-            parsed_config = res.json()
-            idp_payload = {
-                "alias": SAML_ALIAS,
-                "providerId": "saml",
-                "enabled": True,
-                "config": parsed_config
+        # 准备一个基础的 IDP 配置
+        # 注意：不再在 URL 里传 SAML_ALIAS，由后端从环境变量取
+        idp_payload = {
+            "enabled": True,
+            "config": {
+                "singleSignOnServiceUrl": "https://mock-idp/sso",
+                "entityId": "http://mock-idp"
             }
-            res = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/instances", json=idp_payload)
-            self.log("创建SAML实例", res)
+        }
 
-            if res.status_code == 200:
-                get_res = self.session.get(f"{self.base_url}/{TEST_REALM}/idp/saml/instances")
-                self.log("查询IDP列表", get_res)
+        # 1. 第一次创建 (预期成功)
+        res = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/instances", json=idp_payload)
+        self.log("创建第一个 SAML 实例", res)
 
-                del_res = self.session.delete(f"{self.base_url}/{TEST_REALM}/idp/saml/instances/{SAML_ALIAS}")
-                self.log("删除SAML实例", del_res)
+        # 记录实际使用的 Alias (后端返回的)
+        actual_alias = res.json().get("alias") if res.status_code == 201 else "da-saml-idp"
+
+        # 2. 第二次创建 (预期失败 - 400 Bad Request)
+        res_fail = self.session.post(f"{self.base_url}/{TEST_REALM}/idp/saml/instances", json=idp_payload)
+        if res_fail.status_code == 400:
+            print(f"✅ [PASS] 验证单 Realm 唯一性拦截成功: {res_fail.json().get('detail')}")
+            self.passed_count += 1
+            self.total_count += 1
+        else:
+            self.log("验证单 Realm 唯一性拦截失败", res_fail)
+
+        # 3. 测试 PUT 更新接口
+        update_payload = {
+            "enabled": False,  # 尝试禁用它
+            "config": {
+                "singleSignOnServiceUrl": "https://new-mock-idp/sso",
+                "guiOrder": "1"
+            }
+        }
+        # 修正后的测试调用
+        res_put = self.session.put(f"{self.base_url}/{TEST_REALM}/idp/saml/instances", json=update_payload)
+        self.log("更新已有 SAML 实例配置", res_put)
+
+        # 4. 验证更新结果 (GET 检查)
+        # 假设你的获取接口是 GET /saml/instances/{alias} 或类似
+        res_get = self.session.get(f"{self.base_url}/{TEST_REALM}/idp/saml/instances")
+        if res_get.status_code == 200:
+            instances = res_get.json()
+            # 找到我们那个 alias 的实例，检查 enabled 是否变为了 False
+            target = next((i for i in instances if i['alias'] == actual_alias), None)
+            if target and target.get('enabled') is False:
+                print(f"✅ [PASS] 验证 PUT 更新内容生效")
+                self.passed_count += 1
+                self.total_count += 1
+            else:
+                print(f"❌ [FAIL] 验证 PUT 更新内容未生效")
+                self.total_count += 1
+
+        # 5. 清理 (删除这个 IDP 方便后续测试)
+        # 注意：这里的 URL 路径需根据你实际的删除接口调整
+        del_res = self.session.delete(f"{self.base_url}/{TEST_REALM}/idp/saml/instances/{actual_alias}")
+        self.log("清理删除 SAML 实例", del_res)
 
     # --- 4. 群组与用户管理场景 (补全了增删改) ---
     def test_group_and_user_management(self):
