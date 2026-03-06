@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.core.keycloak import KeycloakError
-from app.api.v1 import tenants, idp, identity  # 导入所有模块
+from app.api.v1 import tenants, idp, identity, common
 
 
 load_dotenv()
@@ -18,6 +18,7 @@ async def global_kc_exception_handler(request: Request, exc: KeycloakError):
 app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(idp.router, prefix="/api/v1")
 app.include_router(identity.router, prefix="/api/v1")
+app.include_router(common.router, prefix="/api/v1")
 
 @app.get("/api/v1/export-spec", include_in_schema=False)
 def export_spec():
