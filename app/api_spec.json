@@ -77,7 +77,6 @@
           "Tenants"
         ],
         "summary": "Delete Tenant",
-        "description": "删除租户，拦截对 master 的删除",
         "operationId": "delete_tenant_api_v1_tenants__realm_name__delete",
         "parameters": [
           {
@@ -758,6 +757,56 @@
           }
         }
       },
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "summary": "Get Group Detail",
+        "description": "获取 Group 详情：基础 + 成员(仅名) + 角色(过滤内置)",
+        "operationId": "get_group_detail_api_v1__realm__groups__group_id__get",
+        "parameters": [
+          {
+            "name": "realm",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Realm"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Identity"
@@ -853,7 +902,7 @@
           "Identity"
         ],
         "summary": "Get User Full Context",
-        "description": "获取用户的完整上下文：所属组 + 拥有的角色",
+        "description": "获取用户的完整上下文：所属组 + 拥有的角色 (已过滤内置角色)\n注意：此接口已通过 router 级别的 skip_master_realm 依赖自动拦截 master",
         "operationId": "get_user_full_context_api_v1__realm__users__user_id__details_get",
         "parameters": [
           {
@@ -891,6 +940,42 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/common/health": {
+      "get": {
+        "tags": [
+          "Common"
+        ],
+        "summary": "Health Check",
+        "description": "健康检查接口 (GET /api/v1/common/health)",
+        "operationId": "health_check_api_v1_common_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Read Index",
+        "operationId": "read_index__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -960,6 +1045,58 @@
         ],
         "title": "GroupCreate",
         "description": "创建组时使用的模型"
+      },
+      "GroupDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMember"
+            },
+            "type": "array",
+            "title": "Members",
+            "default": []
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "GroupDetailResponse"
+      },
+      "GroupMember": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "GroupMember"
       },
       "GroupResponse": {
         "properties": {
