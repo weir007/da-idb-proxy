@@ -1,9 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from app.core.keycloak import kc
+from app.api.v1.common import skip_master_realm
 
 import os
 
-router = APIRouter(prefix="/{realm}/idp", tags=["IDP"])
+router = APIRouter(prefix="/{realm}/idp", tags=["IDP"], dependencies=[Depends(skip_master_realm)])
 
 
 @router.post("/saml/import")
