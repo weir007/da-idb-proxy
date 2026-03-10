@@ -1,5 +1,21 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict
+from app.schemas.roles import RoleResponse
+
+
+class GroupMember(BaseModel):
+    id: str
+    username: str
+
+class GroupDetailResponse(BaseModel):
+    id: str
+    name: str
+    # 聚合后的字段
+    members: List[GroupMember] = []
+    roles: List[RoleResponse] = []
+
+    class Config:
+        from_attributes = True
 
 
 class GroupBase(BaseModel):
