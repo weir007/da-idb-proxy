@@ -1,23 +1,18 @@
 from typing import List
 from fastapi import APIRouter, status, HTTPException
+from fastapi.params import Depends
+
 from app.core.keycloak import kc
 from app.schemas.realm import TenantCreate, TenantResponse
+from app.api.v1.common import skip_master_realm
 import os
 
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
+
 # 获取受保护的 Master Realm 名称，默认为 "master"
 PROTECTED_REALM = os.getenv("KC_REALM", "master")
-
-
-def check_not_master(realm_name: str):
-    """拦截对 Master Realm 的敏感操作"""
-    if realm_name.lower() == PROTECTED_REALM.lower():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Operation on protected realm '{PROTECTED_REALM}' is not allowed."
-        )
 
 
 @router.get("", response_model=List[dict])
@@ -27,12 +22,11 @@ def list_tenants():
     return [r for r in realms if r['realm'].lower() != PROTECTED_REALM.lower()]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, response_model=TenantResponse)
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=TenantResponse,
+             dependencies=[Depends(skip_master_realm)])
 def create_tenant(payload: TenantCreate):
-    realm = payload.realm
-
     # 拦截尝试创建或覆盖 master 的行为
-    check_not_master(realm)
+    realm = payload.realm
 
     # 1. 创建 Realm
     kc.request("POST", "/realms", json={
@@ -68,10 +62,7 @@ def create_tenant(payload: TenantCreate):
     }
 
 
-@router.delete("/{realm_name}")
+@router.delete("/{realm_name}", dependencies=[Depends(skip_master_realm)])
 def delete_tenant(realm_name: str):
-    """删除租户，拦截对 master 的删除"""
-    check_not_master(realm_name)
-
     kc.request("DELETE", f"/realms/{realm_name}")
     return {"msg": f"Tenant {realm_name} deleted successfully"}
