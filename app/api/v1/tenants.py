@@ -1,23 +1,38 @@
 from typing import List
-from fastapi import APIRouter, status
+from fastapi import APIRouter, status, HTTPException
 from app.core.keycloak import kc
 from app.schemas.realm import TenantCreate, TenantResponse
+import os
 
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
+# 获取受保护的 Master Realm 名称，默认为 "master"
+PROTECTED_REALM = os.getenv("KC_REALM", "master")
+
+
+def check_not_master(realm_name: str):
+    """拦截对 Master Realm 的敏感操作"""
+    if realm_name.lower() == PROTECTED_REALM.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Operation on protected realm '{PROTECTED_REALM}' is not allowed."
+        )
+
 
 @router.get("", response_model=List[dict])
 def list_tenants():
-    """获取所有租户 (GET /api/v1/tenants)"""
+    """获取所有租户，自动过滤掉 master"""
     realms = kc.request("GET", "/realms").json()
-    # 过滤 master
-    return [r for r in realms if r['realm'] != 'master']
+    return [r for r in realms if r['realm'].lower() != PROTECTED_REALM.lower()]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=TenantResponse)
 def create_tenant(payload: TenantCreate):
     realm = payload.realm
+
+    # 拦截尝试创建或覆盖 master 的行为
+    check_not_master(realm)
 
     # 1. 创建 Realm
     kc.request("POST", "/realms", json={
@@ -33,12 +48,11 @@ def create_tenant(payload: TenantCreate):
         "webOrigins": ["*"]
     })
 
-    # 3. 编排权限：获取 realm-management 并筛选出那 5 个核心 Role
+    # 3. 编排权限
     mgmt_clients = kc.request("GET", f"/realms/{realm}/clients", params={"clientId": "realm-management"}).json()
     mgmt_uuid = mgmt_clients[0]['id']
 
     all_roles = kc.request("GET", f"/realms/{realm}/clients/{mgmt_uuid}/roles").json()
-    # 你之前提到的 5 个核心管理权限
     target_names = ["manage-realm", "manage-identity-providers", "manage-users", "view-users", "query-users"]
     selected_roles = [r for r in all_roles if r['name'] in target_names]
 
@@ -56,6 +70,8 @@ def create_tenant(payload: TenantCreate):
 
 @router.delete("/{realm_name}")
 def delete_tenant(realm_name: str):
-    """删除租户 (DELETE /api/v1/tenants/{realm_name})"""
+    """删除租户，拦截对 master 的删除"""
+    check_not_master(realm_name)
+
     kc.request("DELETE", f"/realms/{realm_name}")
-    return {"msg": f"Tenant {realm_name} deleted"}
+    return {"msg": f"Tenant {realm_name} deleted successfully"}
