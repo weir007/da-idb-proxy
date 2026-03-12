@@ -46,7 +46,10 @@ class KeycloakClient:
         token = self._get_token()
         # 核心：确保 URL 只有一段 /admin
         clean_path = path.lstrip('/')
-        url = f"{self.base_url}/admin/{clean_path}"
+        if not clean_path.startswith("admin/"):
+            url = f"{self.base_url}/admin/{clean_path}"
+        else:
+            url = f"{self.base_url}/{clean_path}"
 
         headers = kwargs.pop("headers", {})
         headers.update({"Authorization": f"Bearer {token}"})
