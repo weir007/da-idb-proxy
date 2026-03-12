@@ -276,10 +276,21 @@ async function viewGroup(groupId) {
 
 async function showEditGroupModal(groupId) {
     try {
-        const groups = await listGroups(currentRealm);
-        const group = groups.find(g => g.id === groupId);
-        if (!group) {
+        // 获取组详情（包含成员和角色）
+        const groupDetail = await getGroupDetail(currentRealm, groupId);
+        if (!groupDetail) {
             showErrorToast('未找到该组');
+            return;
+        }
+
+        // 获取所有角色和用户
+        let roles = [];
+        let users = [];
+        try {
+            roles = await listRoles(currentRealm);
+            users = await listUsers(currentRealm);
+        } catch (error) {
+            showErrorToast('加载角色或用户列表失败: ' + error.message);
             return;
         }
 
@@ -287,11 +298,29 @@ async function showEditGroupModal(groupId) {
             <form id="editGroupForm">
                 <div class="form-group">
                     <label for="groupName">组名称 *</label>
-                    <input type="text" id="groupName" name="name" value="${group.name || ''}" required>
+                    <input type="text" id="groupName" name="name" value="${groupDetail.name || ''}" required>
                 </div>
                 <div class="form-group">
                     <label for="groupPath">路径</label>
-                    <input type="text" id="groupPath" name="path" value="${group.path || ''}">
+                    <input type="text" id="groupPath" name="path" value="${groupDetail.path || ''}">
+                </div>
+                <div class="form-group">
+                    <label for="roleSelect">添加角色</label>
+                    <select id="roleSelect">
+                        <option value="">请选择角色</option>
+                        ${roles.map(r => `<option value="${r.name}">${r.name}</option>`).join('')}
+                    </select>
+                    <button type="button" class="btn btn-secondary" onclick="addRole()">添加</button>
+                    <div id="selectedRoles" class="tag-container"></div>
+                </div>
+                <div class="form-group">
+                    <label for="userSelect">添加用户</label>
+                    <select id="userSelect">
+                        <option value="">请选择用户</option>
+                        ${users.map(u => `<option value="${u.id}">${u.username || u.email || u.id}</option>`).join('')}
+                    </select>
+                    <button type="button" class="btn btn-secondary" onclick="addUser()">添加</button>
+                    <div id="selectedUsers" class="tag-container"></div>
                 </div>
             </form>
         `;
@@ -302,6 +331,8 @@ async function showEditGroupModal(groupId) {
             const groupData = {
                 name: formData.get('name'),
                 path: formData.get('path'),
+                users: window.selectedUsers || [],
+                roles: window.selectedRoles || [],
             };
 
             if (!groupData.name) {
@@ -318,12 +349,29 @@ async function showEditGroupModal(groupId) {
                 showErrorToast('更新组失败: ' + error.message);
             }
         });
+
+        // 初始化选中的角色和用户
+        window.selectedRoles = groupDetail.roles ? groupDetail.roles.map(r => r.name) : [];
+        window.selectedUsers = groupDetail.members ? groupDetail.members.map(m => m.id) : [];
+        renderSelectedRoles();
+        renderSelectedUsers();
     } catch (error) {
         showErrorToast('加载组信息失败: ' + error.message);
     }
 }
 
-function showCreateGroupModal() {
+async function showCreateGroupModal() {
+    // 获取所有角色和用户
+    let roles = [];
+    let users = [];
+    try {
+        roles = await listRoles(currentRealm);
+        users = await listUsers(currentRealm);
+    } catch (error) {
+        showErrorToast('加载角色或用户列表失败: ' + error.message);
+        return;
+    }
+
     const content = `
         <form id="createGroupForm">
             <div class="form-group">
@@ -334,6 +382,24 @@ function showCreateGroupModal() {
                 <label for="groupPath">路径</label>
                 <input type="text" id="groupPath" name="path" placeholder="请输入路径">
             </div>
+            <div class="form-group">
+                <label for="roleSelect">添加角色</label>
+                <select id="roleSelect">
+                    <option value="">请选择角色</option>
+                    ${roles.map(r => `<option value="${r.name}">${r.name}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="addRole()">添加</button>
+                <div id="selectedRoles" class="tag-container"></div>
+            </div>
+            <div class="form-group">
+                <label for="userSelect">添加用户</label>
+                <select id="userSelect">
+                    <option value="">请选择用户</option>
+                    ${users.map(u => `<option value="${u.id}">${u.username || u.email || u.id}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="addUser()">添加</button>
+                <div id="selectedUsers" class="tag-container"></div>
+            </div>
         </form>
     `;
 
@@ -343,6 +409,8 @@ function showCreateGroupModal() {
         const groupData = {
             name: formData.get('name'),
             path: formData.get('path'),
+            users: window.selectedUsers || [],
+            roles: window.selectedRoles || [],
         };
 
         if (!groupData.name) {
@@ -359,6 +427,82 @@ function showCreateGroupModal() {
             showErrorToast('创建组失败: ' + error.message);
         }
     });
+
+    // 初始化选中的角色和用户
+    window.selectedRoles = [];
+    window.selectedUsers = [];
+    renderSelectedRoles();
+    renderSelectedUsers();
+}
+
+function addRole() {
+    const select = document.getElementById('roleSelect');
+    const roleName = select.value;
+    if (!roleName) {
+        showErrorToast('请选择角色');
+        return;
+    }
+    if (window.selectedRoles.includes(roleName)) {
+        showErrorToast('该角色已添加');
+        return;
+    }
+    window.selectedRoles.push(roleName);
+    renderSelectedRoles();
+    select.value = '';
+}
+
+function removeRole(roleName) {
+    window.selectedRoles = window.selectedRoles.filter(r => r !== roleName);
+    renderSelectedRoles();
+}
+
+function renderSelectedRoles() {
+    const container = document.getElementById('selectedRoles');
+    if (!container) return;
+    container.innerHTML = window.selectedRoles.map(role => `
+        <span class="tag">
+            ${role}
+            <span class="tag-close" onclick="removeRole('${role}')">&times;</span>
+        </span>
+    `).join('');
+}
+
+function addUser() {
+    const select = document.getElementById('userSelect');
+    const userId = select.value;
+    if (!userId) {
+        showErrorToast('请选择用户');
+        return;
+    }
+    if (window.selectedUsers.includes(userId)) {
+        showErrorToast('该用户已添加');
+        return;
+    }
+    window.selectedUsers.push(userId);
+    renderSelectedUsers();
+    select.value = '';
+}
+
+function removeUser(userId) {
+    window.selectedUsers = window.selectedUsers.filter(u => u !== userId);
+    renderSelectedUsers();
+}
+
+function renderSelectedUsers() {
+    const container = document.getElementById('selectedUsers');
+    if (!container) return;
+    const select = document.getElementById('userSelect');
+    const options = select ? Array.from(select.options) : [];
+    container.innerHTML = window.selectedUsers.map(userId => {
+        const option = options.find(opt => opt.value === userId);
+        const label = option ? option.text : userId;
+        return `
+            <span class="tag">
+                ${label}
+                <span class="tag-close" onclick="removeUser('${userId}')">&times;</span>
+            </span>
+        `;
+    }).join('');
 }
 
 function deleteGroupHandler(groupId) {
@@ -629,15 +773,7 @@ function renderIdpList(idps) {
 function showCreateIdpModal() {
     const content = `
         <form id="createIdpForm">
-            <div class="form-group">
-                <label for="samlFile">导入SAML Metadata（可选）</label>
-                <div class="file-upload" onclick="document.getElementById('samlFile').click()">
-                    <input type="file" id="samlFile" name="file" accept=".xml">
-                    <span class="file-upload-label" id="fileLabel">点击选择文件</span>
-                </div>
-                <button type="button" class="btn btn-secondary" id="importBtn" style="margin-top: 10px;">导入并解析</button>
-            </div>
-            <hr style="margin: 20px 0;">
+            <!-- 基础配置 -->
             <div class="form-group">
                 <label for="idpAlias">别名 *</label>
                 <input type="text" id="idpAlias" name="alias" required placeholder="请输入IDP别名">
@@ -654,12 +790,110 @@ function showCreateIdpModal() {
                 </select>
             </div>
             <div class="form-group">
-                <label for="idpEntityId">Entity ID</label>
-                <input type="text" id="idpEntityId" name="entityId" placeholder="请输入Entity ID">
+                <label for="idpTrustEmail">信任邮箱</label>
+                <select id="idpTrustEmail" name="trustEmail">
+                    <option value="false">不信任</option>
+                    <option value="true">信任</option>
+                </select>
             </div>
-            <div class="form-group">
-                <label for="idpSsoUrl">SSO URL</label>
-                <input type="text" id="idpSsoUrl" name="ssoUrl" placeholder="请输入SSO URL">
+
+            <!-- 元数据表单（默认折叠） -->
+            <div class="collapsible-section">
+                <div class="collapsible-header collapsed" id="metadataHeader">
+                    <span>SAML元数据配置</span>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="collapsible-content collapsed" id="metadataContent">
+                    <div class="form-group">
+                        <label for="samlFile">导入SAML Metadata</label>
+                        <div class="file-upload" onclick="document.getElementById('samlFile').click()">
+                            <input type="file" id="samlFile" name="file" accept=".xml">
+                            <span class="file-upload-label" id="fileLabel">点击选择文件</span>
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="importBtn" style="margin-top: 10px;">导入并解析</button>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpEntityId">Entity ID</label>
+                        <input type="text" id="idpEntityId" name="entityId" placeholder="请输入Entity ID">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpSsoUrl">SSO Service URL *</label>
+                        <input type="text" id="idpSsoUrl" name="ssoUrl" required placeholder="请输入SSO Service URL">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpSingleLogoutServiceUrl">Single Logout Service URL</label>
+                        <input type="text" id="idpSingleLogoutServiceUrl" name="singleLogoutServiceUrl" placeholder="请输入Single Logout Service URL">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpValidateSignature">Validate Signature</label>
+                        <select id="idpValidateSignature" name="validateSignature">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpSigningCertificate">Signing Certificate</label>
+                        <textarea id="idpSigningCertificate" name="signingCertificate" rows="3" placeholder="请输入Signing Certificate"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpPostBindingLogout">Post Binding Logout</label>
+                        <select id="idpPostBindingLogout" name="postBindingLogout">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpNameIDPolicyFormat">Name ID Policy Format</label>
+                        <input type="text" id="idpNameIDPolicyFormat" name="nameIDPolicyFormat" placeholder="请输入Name ID Policy Format">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpLoginHint">Login Hint</label>
+                        <input type="text" id="idpLoginHint" name="loginHint" placeholder="请输入Login Hint">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpMetadataDescriptorUrl">Metadata Descriptor URL</label>
+                        <input type="text" id="idpMetadataDescriptorUrl" name="metadataDescriptorUrl" placeholder="请输入Metadata Descriptor URL">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpEnableFormMetadata">Enable Form Metadata</label>
+                        <select id="idpEnableFormMetadata" name="enableFormMetadata">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpPostBindingAuthnRequest">Post Binding Authn Request</label>
+                        <select id="idpPostBindingAuthnRequest" name="postBindingAuthnRequest">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpWantAuthnRequestsSigned">Want Authn Requests Signed</label>
+                        <select id="idpWantAuthnRequestsSigned" name="wantAuthnRequestsSigned">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpArtifactResolutionServiceUrl">Artifact Resolution Service URL</label>
+                        <input type="text" id="idpArtifactResolutionServiceUrl" name="artifactResolutionServiceUrl" placeholder="请输入Artifact Resolution Service URL">
+                    </div>
+                    <div class="form-group">
+                        <label for="idpAddExtensionsElementWithKeyInfo">Add Extensions Element With KeyInfo</label>
+                        <select id="idpAddExtensionsElementWithKeyInfo" name="addExtensionsElementWithKeyInfo">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="idpArtifactBindingResponse">Artifact Binding Response</label>
+                        <select id="idpArtifactBindingResponse" name="artifactBindingResponse">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </form>
     `;
@@ -671,14 +905,33 @@ function showCreateIdpModal() {
             alias: formData.get('alias'),
             displayName: formData.get('displayName'),
             enabled: formData.get('enabled') === 'true',
+            trustEmail: formData.get('trustEmail') === 'true',
             config: {
                 entityId: formData.get('entityId'),
                 singleSignOnServiceUrl: formData.get('ssoUrl'),
+                singleLogoutServiceUrl: formData.get('singleLogoutServiceUrl'),
+                validateSignature: formData.get('validateSignature') === 'true',
+                signingCertificate: formData.get('signingCertificate'),
+                postBindingLogout: formData.get('postBindingLogout') === 'true',
+                nameIDPolicyFormat: formData.get('nameIDPolicyFormat'),
+                loginHint: formData.get('loginHint'),
+                metadataDescriptorUrl: formData.get('metadataDescriptorUrl'),
+                enableFormMetadata: formData.get('enableFormMetadata') === 'true',
+                postBindingAuthnRequest: formData.get('postBindingAuthnRequest') === 'true',
+                wantAuthnRequestsSigned: formData.get('wantAuthnRequestsSigned') === 'true',
+                artifactResolutionServiceUrl: formData.get('artifactResolutionServiceUrl'),
+                addExtensionsElementWithKeyInfo: formData.get('addExtensionsElementWithKeyInfo') === 'true',
+                artifactBindingResponse: formData.get('artifactBindingResponse') === 'true',
             },
         };
 
         if (!idpData.alias) {
             showErrorToast('请输入IDP别名');
+            return;
+        }
+
+        if (!idpData.config.singleSignOnServiceUrl) {
+            showErrorToast('请输入SSO Service URL');
             return;
         }
 
@@ -690,6 +943,14 @@ function showCreateIdpModal() {
         } catch (error) {
             showErrorToast('创建IDP实例失败: ' + error.message);
         }
+    });
+
+    // 折叠面板切换
+    const metadataHeader = document.getElementById('metadataHeader');
+    const metadataContent = document.getElementById('metadataContent');
+    metadataHeader.addEventListener('click', () => {
+        metadataHeader.classList.toggle('collapsed');
+        metadataContent.classList.toggle('collapsed');
     });
 
     // 文件选择后更新显示
@@ -716,18 +977,63 @@ function showCreateIdpModal() {
             showSuccessToast('SAML Metadata解析成功');
             
             // 回填解析结果到表单
-            if (result && result.config) {
-                if (result.config.entityId) {
-                    document.getElementById('idpEntityId').value = result.config.entityId;
+            // 支持两种数据结构：result.config 或直接在result中
+            const config = result && result.config ? result.config : result;
+            
+            if (config) {
+                // 回填基础配置
+                if (config.alias) {
+                    document.getElementById('idpAlias').value = config.alias;
                 }
-                if (result.config.singleSignOnServiceUrl) {
-                    document.getElementById('idpSsoUrl').value = result.config.singleSignOnServiceUrl;
+                if (config.displayName) {
+                    document.getElementById('idpDisplayName').value = config.displayName;
                 }
-                if (result.alias) {
-                    document.getElementById('idpAlias').value = result.alias;
+                
+                // 回填元数据配置
+                if (config.entityId) {
+                    document.getElementById('idpEntityId').value = config.entityId;
                 }
-                if (result.displayName) {
-                    document.getElementById('idpDisplayName').value = result.displayName;
+                if (config.singleSignOnServiceUrl) {
+                    document.getElementById('idpSsoUrl').value = config.singleSignOnServiceUrl;
+                }
+                if (config.singleLogoutServiceUrl) {
+                    document.getElementById('idpSingleLogoutServiceUrl').value = config.singleLogoutServiceUrl;
+                }
+                if (config.validateSignature !== undefined) {
+                    document.getElementById('idpValidateSignature').value = config.validateSignature.toString();
+                }
+                if (config.signingCertificate) {
+                    document.getElementById('idpSigningCertificate').value = config.signingCertificate;
+                }
+                if (config.postBindingLogout !== undefined) {
+                    document.getElementById('idpPostBindingLogout').value = config.postBindingLogout.toString();
+                }
+                if (config.nameIDPolicyFormat) {
+                    document.getElementById('idpNameIDPolicyFormat').value = config.nameIDPolicyFormat;
+                }
+                if (config.loginHint) {
+                    document.getElementById('idpLoginHint').value = config.loginHint;
+                }
+                if (config.metadataDescriptorUrl) {
+                    document.getElementById('idpMetadataDescriptorUrl').value = config.metadataDescriptorUrl;
+                }
+                if (config.enableFormMetadata !== undefined) {
+                    document.getElementById('idpEnableFormMetadata').value = config.enableFormMetadata.toString();
+                }
+                if (config.postBindingAuthnRequest !== undefined) {
+                    document.getElementById('idpPostBindingAuthnRequest').value = config.postBindingAuthnRequest.toString();
+                }
+                if (config.wantAuthnRequestsSigned !== undefined) {
+                    document.getElementById('idpWantAuthnRequestsSigned').value = config.wantAuthnRequestsSigned.toString();
+                }
+                if (config.artifactResolutionServiceUrl) {
+                    document.getElementById('idpArtifactResolutionServiceUrl').value = config.artifactResolutionServiceUrl;
+                }
+                if (config.addExtensionsElementWithKeyInfo !== undefined) {
+                    document.getElementById('idpAddExtensionsElementWithKeyInfo').value = config.addExtensionsElementWithKeyInfo.toString();
+                }
+                if (config.artifactBindingResponse !== undefined) {
+                    document.getElementById('idpArtifactBindingResponse').value = config.artifactBindingResponse.toString();
                 }
             }
         } catch (error) {
@@ -747,15 +1053,7 @@ async function showEditIdpModal(alias) {
 
         const content = `
             <form id="editIdpForm">
-                <div class="form-group">
-                    <label for="samlFile">导入SAML Metadata（可选）</label>
-                    <div class="file-upload" onclick="document.getElementById('samlFile').click()">
-                        <input type="file" id="samlFile" name="file" accept=".xml">
-                        <span class="file-upload-label" id="fileLabel">点击选择文件</span>
-                    </div>
-                    <button type="button" class="btn btn-secondary" id="importBtn" style="margin-top: 10px;">导入并解析</button>
-                </div>
-                <hr style="margin: 20px 0;">
+                <!-- 基础配置 -->
                 <div class="form-group">
                     <label for="idpAlias">别名 *</label>
                     <input type="text" id="idpAlias" name="alias" value="${idp.alias || ''}" required>
@@ -772,12 +1070,110 @@ async function showEditIdpModal(alias) {
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="idpEntityId">Entity ID</label>
-                    <input type="text" id="idpEntityId" name="entityId" value="${idp.config?.entityId || ''}">
+                    <label for="idpTrustEmail">信任邮箱</label>
+                    <select id="idpTrustEmail" name="trustEmail">
+                        <option value="false" ${!idp.trustEmail ? 'selected' : ''}>不信任</option>
+                        <option value="true" ${idp.trustEmail ? 'selected' : ''}>信任</option>
+                    </select>
                 </div>
-                <div class="form-group">
-                    <label for="idpSsoUrl">SSO URL</label>
-                    <input type="text" id="idpSsoUrl" name="ssoUrl" value="${idp.config?.singleSignOnServiceUrl || ''}">
+
+                <!-- 元数据表单（默认折叠） -->
+                <div class="collapsible-section">
+                    <div class="collapsible-header collapsed" id="metadataHeader">
+                        <span>SAML元数据配置</span>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="collapsible-content collapsed" id="metadataContent">
+                        <div class="form-group">
+                            <label for="samlFile">导入SAML Metadata</label>
+                            <div class="file-upload" onclick="document.getElementById('samlFile').click()">
+                                <input type="file" id="samlFile" name="file" accept=".xml">
+                                <span class="file-upload-label" id="fileLabel">点击选择文件</span>
+                            </div>
+                            <button type="button" class="btn btn-secondary" id="importBtn" style="margin-top: 10px;">导入并解析</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpEntityId">Entity ID</label>
+                            <input type="text" id="idpEntityId" name="entityId" value="${idp.config?.entityId || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpSsoUrl">SSO Service URL *</label>
+                            <input type="text" id="idpSsoUrl" name="ssoUrl" value="${idp.config?.singleSignOnServiceUrl || ''}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpSingleLogoutServiceUrl">Single Logout Service URL</label>
+                            <input type="text" id="idpSingleLogoutServiceUrl" name="singleLogoutServiceUrl" value="${idp.config?.singleLogoutServiceUrl || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpValidateSignature">Validate Signature</label>
+                            <select id="idpValidateSignature" name="validateSignature">
+                                <option value="false" ${!idp.config?.validateSignature ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.validateSignature ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpSigningCertificate">Signing Certificate</label>
+                            <textarea id="idpSigningCertificate" name="signingCertificate" rows="3" placeholder="请输入Signing Certificate">${idp.config?.signingCertificate || ''}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpPostBindingLogout">Post Binding Logout</label>
+                            <select id="idpPostBindingLogout" name="postBindingLogout">
+                                <option value="false" ${!idp.config?.postBindingLogout ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.postBindingLogout ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpNameIDPolicyFormat">Name ID Policy Format</label>
+                            <input type="text" id="idpNameIDPolicyFormat" name="nameIDPolicyFormat" value="${idp.config?.nameIDPolicyFormat || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpLoginHint">Login Hint</label>
+                            <input type="text" id="idpLoginHint" name="loginHint" value="${idp.config?.loginHint || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpMetadataDescriptorUrl">Metadata Descriptor URL</label>
+                            <input type="text" id="idpMetadataDescriptorUrl" name="metadataDescriptorUrl" value="${idp.config?.metadataDescriptorUrl || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpEnableFormMetadata">Enable Form Metadata</label>
+                            <select id="idpEnableFormMetadata" name="enableFormMetadata">
+                                <option value="false" ${!idp.config?.enableFormMetadata ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.enableFormMetadata ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpPostBindingAuthnRequest">Post Binding Authn Request</label>
+                            <select id="idpPostBindingAuthnRequest" name="postBindingAuthnRequest">
+                                <option value="false" ${!idp.config?.postBindingAuthnRequest ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.postBindingAuthnRequest ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpWantAuthnRequestsSigned">Want Authn Requests Signed</label>
+                            <select id="idpWantAuthnRequestsSigned" name="wantAuthnRequestsSigned">
+                                <option value="false" ${!idp.config?.wantAuthnRequestsSigned ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.wantAuthnRequestsSigned ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpArtifactResolutionServiceUrl">Artifact Resolution Service URL</label>
+                            <input type="text" id="idpArtifactResolutionServiceUrl" name="artifactResolutionServiceUrl" value="${idp.config?.artifactResolutionServiceUrl || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="idpAddExtensionsElementWithKeyInfo">Add Extensions Element With KeyInfo</label>
+                            <select id="idpAddExtensionsElementWithKeyInfo" name="addExtensionsElementWithKeyInfo">
+                                <option value="false" ${!idp.config?.addExtensionsElementWithKeyInfo ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.addExtensionsElementWithKeyInfo ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idpArtifactBindingResponse">Artifact Binding Response</label>
+                            <select id="idpArtifactBindingResponse" name="artifactBindingResponse">
+                                <option value="false" ${!idp.config?.artifactBindingResponse ? 'selected' : ''}>否</option>
+                                <option value="true" ${idp.config?.artifactBindingResponse ? 'selected' : ''}>是</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </form>
         `;
@@ -789,14 +1185,33 @@ async function showEditIdpModal(alias) {
                 alias: formData.get('alias'),
                 displayName: formData.get('displayName'),
                 enabled: formData.get('enabled') === 'true',
+                trustEmail: formData.get('trustEmail') === 'true',
                 config: {
                     entityId: formData.get('entityId'),
                     singleSignOnServiceUrl: formData.get('ssoUrl'),
+                    singleLogoutServiceUrl: formData.get('singleLogoutServiceUrl'),
+                    validateSignature: formData.get('validateSignature') === 'true',
+                    signingCertificate: formData.get('signingCertificate'),
+                    postBindingLogout: formData.get('postBindingLogout') === 'true',
+                    nameIDPolicyFormat: formData.get('nameIDPolicyFormat'),
+                    loginHint: formData.get('loginHint'),
+                    metadataDescriptorUrl: formData.get('metadataDescriptorUrl'),
+                    enableFormMetadata: formData.get('enableFormMetadata') === 'true',
+                    postBindingAuthnRequest: formData.get('postBindingAuthnRequest') === 'true',
+                    wantAuthnRequestsSigned: formData.get('wantAuthnRequestsSigned') === 'true',
+                    artifactResolutionServiceUrl: formData.get('artifactResolutionServiceUrl'),
+                    addExtensionsElementWithKeyInfo: formData.get('addExtensionsElementWithKeyInfo') === 'true',
+                    artifactBindingResponse: formData.get('artifactBindingResponse') === 'true',
                 },
             };
 
             if (!idpData.alias) {
                 showErrorToast('请输入IDP别名');
+                return;
+            }
+
+            if (!idpData.config.singleSignOnServiceUrl) {
+                showErrorToast('请输入SSO Service URL');
                 return;
             }
 
@@ -808,6 +1223,14 @@ async function showEditIdpModal(alias) {
             } catch (error) {
                 showErrorToast('更新IDP实例失败: ' + error.message);
             }
+        });
+
+        // 折叠面板切换
+        const metadataHeader = document.getElementById('metadataHeader');
+        const metadataContent = document.getElementById('metadataContent');
+        metadataHeader.addEventListener('click', () => {
+            metadataHeader.classList.toggle('collapsed');
+            metadataContent.classList.toggle('collapsed');
         });
 
         // 文件选择后更新显示
@@ -834,18 +1257,63 @@ async function showEditIdpModal(alias) {
                 showSuccessToast('SAML Metadata解析成功');
                 
                 // 回填解析结果到表单
-                if (result && result.config) {
-                    if (result.config.entityId) {
-                        document.getElementById('idpEntityId').value = result.config.entityId;
+                // 支持两种数据结构：result.config 或直接在result中
+                const config = result && result.config ? result.config : result;
+                
+                if (config) {
+                    // 回填基础配置
+                    if (config.alias) {
+                        document.getElementById('idpAlias').value = config.alias;
                     }
-                    if (result.config.singleSignOnServiceUrl) {
-                        document.getElementById('idpSsoUrl').value = result.config.singleSignOnServiceUrl;
+                    if (config.displayName) {
+                        document.getElementById('idpDisplayName').value = config.displayName;
                     }
-                    if (result.alias) {
-                        document.getElementById('idpAlias').value = result.alias;
+                    
+                    // 回填元数据配置
+                    if (config.entityId) {
+                        document.getElementById('idpEntityId').value = config.entityId;
                     }
-                    if (result.displayName) {
-                        document.getElementById('idpDisplayName').value = result.displayName;
+                    if (config.singleSignOnServiceUrl) {
+                        document.getElementById('idpSsoUrl').value = config.singleSignOnServiceUrl;
+                    }
+                    if (config.singleLogoutServiceUrl) {
+                        document.getElementById('idpSingleLogoutServiceUrl').value = config.singleLogoutServiceUrl;
+                    }
+                    if (config.validateSignature !== undefined) {
+                        document.getElementById('idpValidateSignature').value = config.validateSignature.toString();
+                    }
+                    if (config.signingCertificate) {
+                        document.getElementById('idpSigningCertificate').value = config.signingCertificate;
+                    }
+                    if (config.postBindingLogout !== undefined) {
+                        document.getElementById('idpPostBindingLogout').value = config.postBindingLogout.toString();
+                    }
+                    if (config.nameIDPolicyFormat) {
+                        document.getElementById('idpNameIDPolicyFormat').value = config.nameIDPolicyFormat;
+                    }
+                    if (config.loginHint) {
+                        document.getElementById('idpLoginHint').value = config.loginHint;
+                    }
+                    if (config.metadataDescriptorUrl) {
+                        document.getElementById('idpMetadataDescriptorUrl').value = config.metadataDescriptorUrl;
+                    }
+                    if (config.enableFormMetadata !== undefined) {
+                        document.getElementById('idpEnableFormMetadata').value = config.enableFormMetadata.toString();
+                    }
+                    if (config.postBindingAuthnRequest !== undefined) {
+                        document.getElementById('idpPostBindingAuthnRequest').value = config.postBindingAuthnRequest.toString();
+                    }
+                    if (config.wantAuthnRequestsSigned !== undefined) {
+                        document.getElementById('idpWantAuthnRequestsSigned').value = config.wantAuthnRequestsSigned.toString();
+                    }
+                    if (config.artifactResolutionServiceUrl) {
+                        document.getElementById('idpArtifactResolutionServiceUrl').value = config.artifactResolutionServiceUrl;
+                    }
+                    if (config.addExtensionsElementWithKeyInfo !== undefined) {
+                        document.getElementById('idpAddExtensionsElementWithKeyInfo').value = config.addExtensionsElementWithKeyInfo.toString();
+                    }
+                    if (config.artifactBindingResponse !== undefined) {
+                        document.getElementById('idpArtifactBindingResponse').value = config.artifactBindingResponse.toString();
                     }
                 }
             } catch (error) {
@@ -868,3 +1336,27 @@ function deleteIdpHandler(alias) {
         }
     });
 }
+
+// ==================== 将函数暴露到全局作用域 ====================
+window.loadUserModule = loadUserModule;
+window.loadGroupModule = loadGroupModule;
+window.loadRoleModule = loadRoleModule;
+window.loadIdpModule = loadIdpModule;
+window.viewUser = viewUser;
+window.viewGroup = viewGroup;
+window.toggleSelectAllGroups = toggleSelectAllGroups;
+window.showEditGroupModal = showEditGroupModal;
+window.showCreateGroupModal = showCreateGroupModal;
+window.deleteGroupHandler = deleteGroupHandler;
+window.showCreateRoleModal = showCreateRoleModal;
+window.showEditRoleModal = showEditRoleModal;
+window.deleteRoleHandler = deleteRoleHandler;
+window.showCreateIdpModal = showCreateIdpModal;
+window.showEditIdpModal = showEditIdpModal;
+window.deleteIdpHandler = deleteIdpHandler;
+window.addRole = addRole;
+window.removeRole = removeRole;
+window.renderSelectedRoles = renderSelectedRoles;
+window.addUser = addUser;
+window.removeUser = removeUser;
+window.renderSelectedUsers = renderSelectedUsers;
