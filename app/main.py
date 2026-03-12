@@ -20,7 +20,7 @@ app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(idp.router, prefix="/api/v1")
 app.include_router(identity.router, prefix="/api/v1")
 app.include_router(common.router, prefix="/api/v1")
-# 挂载静态文件服务
+'''[仅供演示!!!]挂载静态文件服务 开始'''
 ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 app.mount("/ui", StaticFiles(directory=ui_path), name="ui")
 
@@ -28,6 +28,7 @@ app.mount("/ui", StaticFiles(directory=ui_path), name="ui")
 async def read_index():
     # 直接返回该 HTML 文件
     return RedirectResponse(url="/ui/index.html")
+'''[仅供演示!!!]挂载静态文件服务 结束'''
 
 
 @app.get("/api/v1/export-spec", include_in_schema=False)
