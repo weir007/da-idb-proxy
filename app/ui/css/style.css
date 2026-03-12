@@ -308,7 +308,8 @@ table tr.selected {
 }
 
 /* 标签样式 */
-.tags-container {
+.tags-container,
+.tag-container {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -325,14 +326,57 @@ table tr.selected {
     font-size: 13px;
 }
 
-.tag-remove {
+.tag-remove,
+.tag-close {
     margin-left: 8px;
     cursor: pointer;
     font-weight: bold;
 }
 
-.tag-remove:hover {
+.tag-remove:hover,
+.tag-close:hover {
     color: #e74c3c;
+}
+
+/* 折叠面板样式 */
+.collapsible-section {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+
+.collapsible-header {
+    background-color: #f8f9fa;
+    padding: 12px 15px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    user-select: none;
+}
+
+.collapsible-header:hover {
+    background-color: #e9ecef;
+}
+
+.collapsible-header .toggle-icon {
+    transition: transform 0.3s ease;
+}
+
+.collapsible-header.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+
+.collapsible-content {
+    padding: 15px;
+    display: block;
+    transition: max-height 0.3s ease;
+}
+
+.collapsible-content.collapsed {
+    display: none;
 }
 
 /* 页面标题样式 */
@@ -453,4 +497,31 @@ table tr.selected {
 
 .file-upload-label:hover {
     color: #3498db;
+}
+/* 面包屑导航样式 */
+.breadcrumb {
+    padding: 15px 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 14px;
+}
+
+.breadcrumb a {
+    color: #3498db;
+    text-decoration: none;
+    transition: color 0.3s;
+}
+
+.breadcrumb a:hover {
+    color: #2980b9;
+    text-decoration: underline;
+}
+
+.breadcrumb-separator {
+    margin: 0 8px;
+    color: #95a5a6;
+}
+
+.breadcrumb-current {
+    color: #7f8c8d;
 }
