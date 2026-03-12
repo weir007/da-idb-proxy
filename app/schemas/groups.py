@@ -27,12 +27,11 @@ class GroupBase(BaseModel):
 
 
 class GroupCreate(GroupBase):
-    """创建组时使用的模型"""
-    pass
+    users: Optional[List[str]] = []  # 用户 ID 列表
+    roles: Optional[List[str]] = []  # 角色名称列表
 
 
-class GroupUpdate(GroupBase):
-    """更新组时使用的模型，字段皆可选"""
+class GroupUpdate(GroupCreate): # 继承 Create 以获得相同的字段
     name: Optional[str] = None
 
 
