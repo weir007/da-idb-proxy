@@ -1,7 +1,6 @@
 import requests
 import json
 import uuid
-import io
 
 # 配置信息
 BASE_URL = "http://127.0.0.1:8090/api/v1"
@@ -52,8 +51,7 @@ class KeycloakWrapperTester:
                 print(f"  - {case}")
         print("=" * 40 + "\n")
 
-    
-    # --- 1. 健康检查 ---
+    # --- 0. 健康检查 ---
     def test_health_check(self):
         print("\n=== [场景 1: 健康检查] ===")
         res = self.session.get(f"{self.base_url}/common/health")
@@ -62,9 +60,9 @@ class KeycloakWrapperTester:
             data = res.json()
             print(f"   Status: {data.get('status')}, Timestamp: {data.get('timestamp')}")
 
-    # --- 2. 租户管理场景 ---
+    # --- 1. 租户管理场景 ---
     def test_tenant_management(self):
-        print("\n=== [场景 2: 租户管理] ===")
+        print("\n=== [场景 1: 租户管理] ===")
         # 创建
         payload = {"realm": TEST_REALM, "displayName": "自动化测试租户"}
         res = self.session.post(f"{self.base_url}/tenants", json=payload)
@@ -74,9 +72,9 @@ class KeycloakWrapperTester:
         res = self.session.get(f"{self.base_url}/tenants")
         self.log("查看租户列表", res)
 
-    # --- 3. 角色管理场景 (带 Attributes) ---
+    # --- 2. 角色管理场景 (带 Attributes) ---
     def test_role_management(self):
-        print("\n=== [场景 3: 角色管理] ===")
+        print("\n=== [场景 2: 角色管理] ===")
         role_name = "test_business_role"
 
         # 创建角色
@@ -103,9 +101,9 @@ class KeycloakWrapperTester:
         res = self.session.delete(f"{self.base_url}/{TEST_REALM}/roles/{role_name}")
         self.log("删除角色", res)
 
-    # --- 4. IDP 管理场景 (适配单实例限制与 PUT 接口) ---
+    # --- 3. IDP 管理场景 (适配单实例限制与 PUT 接口) ---
     def test_idp_management(self):
-        print("\n=== [场景 4: IDP 管理 (单实例限制与更新)] ===")
+        print("\n=== [场景 3: IDP 管理 (单实例限制与更新)] ===")
 
         # 准备一个基础的 IDP 配置
         # 注意：不再在 URL 里传 SAML_ALIAS，由后端从环境变量取
@@ -165,9 +163,9 @@ class KeycloakWrapperTester:
         del_res = self.session.delete(f"{self.base_url}/{TEST_REALM}/idp/saml/instances/{actual_alias}")
         self.log("清理删除 SAML 实例", del_res)
 
-    # --- 5. 群组与用户管理场景 (补全了增删改) ---
+    # --- 4. 群组与用户管理场景 (补全了增删改) ---
     def test_group_and_user_management(self):
-        print("\n=== [场景 5: 群组与用户管理] ===")
+        print("\n=== [场景 4: 群组与用户管理] ===")
         group_name = "test_engineering_group"
 
         # 1. 创建群组
@@ -199,16 +197,15 @@ class KeycloakWrapperTester:
         res = self.session.get(f"{self.base_url}/{TEST_REALM}/users")
         self.log("查看用户列表", res)
 
-    # --- 6. 清理租户 ---
+    # --- 5. 清理租户 ---
     def cleanup(self):
         print("\n=== [清理: 删除租户] ===")
         res = self.session.delete(f"{self.base_url}/tenants/{TEST_REALM}")
         self.log("删除测试租户", res)
 
-
-    # --- 7. 导出 OpenAPI ---
+    # --- 6. 导出 OpenAPI ---
     def test_export_spec(self):
-        print("\n=== [场景 7: 导出定义文件] ===")
+        print("\n=== [场景 5: 导出定义文件] ===")
         res = self.session.get(f"{self.base_url}/export-spec")
         self.log("获取OpenAPI定义", res)
         if res.status_code == 200:
