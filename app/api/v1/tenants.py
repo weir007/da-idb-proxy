@@ -55,6 +55,25 @@ def create_tenant(payload: TenantCreate):
     kc.request("POST", f"/realms/{realm}/roles", json={"name": admin_role_name})
     kc.request("POST", f"/realms/{realm}/roles/{admin_role_name}/composites", json=selected_roles)
 
+    # ### 关闭用户首次登录填写profile（keycloak 26.5版本）
+    # 5. 获取 First Broker Login 流程下的所有执行步骤
+    # 注意：Keycloak 26.5 推荐对 URL 中的空格进行编码
+    flow_alias = "first%20broker%20login"
+    target_path = f"/realms/{realm}/authentication/flows/{flow_alias}/executions"
+    executions = kc.request("GET", target_path).json()
+
+    # 6. 查找并禁用 "Review Profile"
+    for ex in executions:
+        # 在 26.5 中，displayName 依然是 "Review Profile"
+        # 或者通过 providerId "idp-review-profile" 匹配更稳妥
+        if ex.get('providerId') == 'idp-review-profile' or ex.get('displayName') == 'Review Profile':
+            ex['requirement'] = 'DISABLED'
+            response = kc.request("PUT", target_path, json=ex)
+
+            if response.status_code == 204:
+                print(f"Successfully disabled Review Profile in {realm}")
+            break
+
     return {
         "realm": realm,
         "id": realm,
