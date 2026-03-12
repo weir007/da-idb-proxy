@@ -13,12 +13,27 @@ async function apiCall(url, options = {}) {
 
     try {
         const response = await fetch(url, mergedOptions);
-        const data = await response.json();
 
+        // 检查响应状态
         if (!response.ok) {
-            throw new Error(data.detail || data.message || '请求失败');
+            // 尝试解析错误信息
+            let errorMessage = '请求失败';
+            try {
+                const data = await response.json();
+                errorMessage = data.detail || data.message || errorMessage;
+            } catch (e) {
+                // 如果无法解析JSON，使用默认错误信息
+            }
+            throw new Error(errorMessage);
         }
 
+        // 处理204 No Content等无响应体的情况
+        if (response.status === 204) {
+            return null;
+        }
+
+        // 尝试解析JSON响应
+        const data = await response.json();
         return data;
     } catch (error) {
         throw error;
