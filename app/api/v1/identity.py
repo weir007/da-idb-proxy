@@ -70,23 +70,80 @@ def list_groups(realm: str):
     return kc.request("GET", f"/realms/{realm}/groups").json()
 
 
+# 辅助工具：同步 Group 的 Users
+def sync_group_users(realm: str, group_id: str, target_user_ids: List[str]):
+    # 1. 获取当前成员
+    current_members = kc.request("GET", f"/realms/{realm}/groups/{group_id}/members").json()
+    current_ids = {m['id'] for m in current_members}
+    target_ids = set(target_user_ids)
+
+    # 2. 移除不再需要的
+    for uid in current_ids - target_ids:
+        kc.request("DELETE", f"/realms/{realm}/users/{uid}/groups/{group_id}")
+
+    # 3. 添加新增的
+    for uid in target_ids - current_ids:
+        kc.request("PUT", f"/realms/{realm}/users/{uid}/groups/{group_id}")
+
+
+# 辅助工具：同步 Group 的 Roles
+def sync_group_roles(realm: str, group_id: str, target_role_names: List[str]):
+    # 1. 获取当前角色映射
+    mappings = kc.request("GET", f"/realms/{realm}/groups/{group_id}/role-mappings/realm").json()
+    current_names = {r['name'] for r in mappings}
+    target_names = set(target_role_names)
+
+    # 2. 移除角色
+    to_delete = [r for r in mappings if r['name'] in (current_names - target_names)]
+    if to_delete:
+        kc.request("DELETE", f"/realms/{realm}/groups/{group_id}/role-mappings/realm", json=to_delete)
+
+    # 3. 添加角色 (需要先获取角色的完整对象)
+    to_add_names = target_names - current_names
+    if to_add_names:
+        roles_to_add = []
+        for name in to_add_names:
+            role_obj = kc.request("GET", f"/realms/{realm}/roles/{name}").json()
+            roles_to_add.append(role_obj)
+        kc.request("POST", f"/realms/{realm}/groups/{group_id}/role-mappings/realm", json=roles_to_add)
+
+
 @router.post("/groups", status_code=201)
 def create_group(realm: str, group: GroupCreate):
-    """创建顶级组"""
-    kc.request("POST", f"/realms/{realm}/groups", json=group.model_dump(exclude_none=True))
-    return {"msg": f"Group {group.name} created"}
+    # 1. 创建组基础信息 (只发 name 等基础字段)
+    payload = group.model_dump(exclude={"users", "roles"}, exclude_none=True)
+    resp = kc.request("POST", f"/realms/{realm}/groups", json=payload)
+
+    # Keycloak 26.5 POST 返回 201 且不带 Body，需要从 Location Header 或再次查询获取 ID
+    # 简单起见，这里假设你能通过名字查到刚创建的 ID
+    new_group = next(g for g in kc.request("GET", f"/realms/{realm}/groups").json() if g['name'] == group.name)
+    group_id = new_group['id']
+
+    # 2. 同步成员和角色
+    if group.users is not None:
+        sync_group_users(realm, group_id, group.users)
+    if group.roles is not None:
+        sync_group_roles(realm, group_id, group.roles)
+
+    return {"msg": f"Group {group.name} created with users/roles", "id": group_id}
 
 
 @router.put("/groups/{group_id}")
 def update_group(realm: str, group_id: str, group_update: GroupUpdate):
-    """更新组信息"""
-    # 先获取当前完整对象
+    # 1. 更新基础信息
     current = kc.request("GET", f"/realms/{realm}/groups/{group_id}").json()
-    # 合并更新
-    update_data = group_update.model_dump(exclude_none=True)
-    current.update(update_data)
-
+    base_data = group_update.model_dump(exclude={"users", "roles"}, exclude_none=True)
+    current.update(base_data)
     kc.request("PUT", f"/realms/{realm}/groups/{group_id}", json=current)
+
+    # 2. 同步成员 (如果传了该字段)
+    if group_update.users is not None:
+        sync_group_users(realm, group_id, group_update.users)
+
+    # 3. 同步角色 (如果传了该字段)
+    if group_update.roles is not None:
+        sync_group_roles(realm, group_id, group_update.roles)
+
     return {"msg": f"Group {group_id} updated"}
 
 
