@@ -168,7 +168,7 @@
           "IDP"
         ],
         "summary": "Create Idp Instance",
-        "description": "创建 IDP 实例：强制注入 Alias 和 ProviderID",
+        "description": "创建 IDP 实例：限制单实例，强制注入环境变量 Alias",
         "operationId": "create_idp_instance_api_v1__realm__idp_saml_instances_post",
         "parameters": [
           {
@@ -186,15 +186,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "User Config"
+                "$ref": "#/components/schemas/IDPRequest"
               }
             }
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -219,7 +217,7 @@
           "IDP"
         ],
         "summary": "Update Idp Instance",
-        "description": "更新 IDP 实例：使用环境变量 Alias 定位",
+        "description": "更新 IDP 实例：先 GET 再合并 PUT",
         "operationId": "update_idp_instance_api_v1__realm__idp_saml_instances_put",
         "parameters": [
           {
@@ -237,9 +235,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "User Config"
+                "$ref": "#/components/schemas/IDPRequest"
               }
             }
           }
@@ -653,7 +649,6 @@
           "Identity"
         ],
         "summary": "Create Group",
-        "description": "创建顶级组",
         "operationId": "create_group_api_v1__realm__groups_post",
         "parameters": [
           {
@@ -704,7 +699,6 @@
           "Identity"
         ],
         "summary": "Update Group",
-        "description": "更新组信息",
         "operationId": "update_group_api_v1__realm__groups__group_id__put",
         "parameters": [
           {
@@ -1037,14 +1031,43 @@
             ],
             "title": "Attributes",
             "description": "组的扩展属性"
+          },
+          "users": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Users",
+            "default": []
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roles",
+            "default": []
           }
         },
         "type": "object",
         "required": [
           "name"
         ],
-        "title": "GroupCreate",
-        "description": "创建组时使用的模型"
+        "title": "GroupCreate"
       },
       "GroupDetailResponse": {
         "properties": {
@@ -1200,11 +1223,40 @@
             ],
             "title": "Attributes",
             "description": "组的扩展属性"
+          },
+          "users": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Users",
+            "default": []
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roles",
+            "default": []
           }
         },
         "type": "object",
-        "title": "GroupUpdate",
-        "description": "更新组时使用的模型，字段皆可选"
+        "title": "GroupUpdate"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1218,6 +1270,49 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IDPRequest": {
+        "properties": {
+          "alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "trustEmail": {
+            "type": "boolean",
+            "title": "Trustemail",
+            "default": false
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "title": "IDPRequest"
       },
       "RoleCreate": {
         "properties": {
