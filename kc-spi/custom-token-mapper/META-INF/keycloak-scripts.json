@@ -1,0 +1,9 @@
+{
+    "mappers": [
+        {
+            "name": "Data Agent Mapper",
+            "fileName": "data-agent-mapper.js",
+            "description": "Data Agent Customized Script-Mapper"
+        }
+    ]
+}
