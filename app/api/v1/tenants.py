@@ -1,84 +1,146 @@
+import os
 from typing import List
-from fastapi import APIRouter, status, HTTPException
-from fastapi.params import Depends
-
+from fastapi import APIRouter, status, Depends
 from app.core.keycloak import kc
 from app.schemas.realm import TenantCreate, TenantResponse
 from app.api.v1.common import skip_master_realm
-import os
-
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
-
-# 获取受保护的 Master Realm 名称，默认为 "master"
+# 配置常量
 PROTECTED_REALM = os.getenv("KC_REALM", "master")
+NEW_CLIENT_ID = os.getenv("KC_NEW_CLIENT_ID", "data-agent")
+MAPPER_PROVIDER_NAME = os.getenv("KC_SCRIPT_MAPPER", "Data Agent Mapper")
+ADMIN_ROLE = os.getenv("DEFAULT_TENANT_ADMIN_ROLE", "tenant-admin")
+ADMIN_USER = os.getenv("DEFAULT_TENANT_ADMIN_NAME", "tenant-admin")
 
 
-@router.get("", response_model=List[dict])
-def list_tenants():
-    """获取所有租户，自动过滤掉 master"""
-    realms = kc.request("GET", "/realms").json()
-    return [r for r in realms if r['realm'].lower() != PROTECTED_REALM.lower()]
+# --- 内部辅助子函数 (减肥部分) ---
 
-
-@router.post("", status_code=status.HTTP_201_CREATED, response_model=TenantResponse,
-             dependencies=[Depends(skip_master_realm)])
-def create_tenant(payload: TenantCreate):
-    # 拦截尝试创建或覆盖 master 的行为
-    realm = payload.realm
-
-    # 1. 创建 Realm
+def _create_realm(realm: str, display_name: str):
+    """1. 创建 Realm"""
     kc.request("POST", "/realms", json={
-        "realm": realm, "displayName": payload.displayName, "enabled": True
+        "realm": realm, "displayName": display_name, "enabled": True
     })
 
-    # 2. 创建默认 Client (data-agent)
-    kc.request("POST", f"/realms/{realm}/clients", json={
-        "clientId": "data-agent",
+
+def _create_client_with_mapper(realm: str):
+    """2. 创建默认 Client 并配置 Script Mapper"""
+    client_payload = {
+        "clientId": NEW_CLIENT_ID,
         "publicClient": True,
         "standardFlowEnabled": True,
         "redirectUris": ["*"],
         "webOrigins": ["*"]
+    }
+
+    # A. 创建 Client 并从 Response Header 获取 UUID
+    resp = kc.request("POST", f"/realms/{realm}/clients", json=client_payload)
+
+    # Keycloak 20+ 创建成功返回 201，并在 Location Header 提供完整 URL
+    # 例如: .../admin/realms/my-realm/clients/6f2d00a6-2256-4e21-a4d1-132507765afb
+    if resp.status_code == 201:
+        location = resp.headers.get("Location")
+        client_uuid = location.split("/")[-1]  # 提取最后一段 UUID
+
+        # B. 构造 Mapper 数组 (符合你找出来的 add-models 接口定义)
+        mappers_payload = [
+            {
+                "name": "tenant-and-roles-injector",
+                "protocol": "openid-connect",
+                "protocolMapper": MAPPER_PROVIDER_NAME,
+                "config": {
+                    "access.token.claim": "true",
+                    "id.token.claim": "true",
+                    "userinfo.token.claim": "true",
+                    "jsonType.label": "String"
+                }
+            }
+        ]
+
+        # C. 调用 add-models 接口批量添加 (注意路径中是 client_uuid)
+        mapper_path = f"/realms/{realm}/clients/{client_uuid}/protocol-mappers/add-models"
+        mapper_resp = kc.request("POST", mapper_path, json=mappers_payload)
+
+        if mapper_resp.status_code == 204:
+            print(f"Successfully configured script mapper for client {NEW_CLIENT_ID} in {realm}")
+    else:
+        # 如果创建失败（比如已存在），记录错误或处理
+        print(f"Failed to create client: {resp.status_code} - {resp.text}")
+
+
+def _setup_admin_roles(realm: str):
+    """3 & 4. 获取管理权限并创建复合角色"""
+    # 获取 realm-management 的 UUID
+    mgmts = kc.request("GET", f"/realms/{realm}/clients", params={"clientId": "realm-management"}).json()
+    mgmt_uuid = mgmts[0]['id']
+
+    # 获取并过滤权限
+    all_roles = kc.request("GET", f"/realms/{realm}/clients/{mgmt_uuid}/roles").json()
+    targets = ["manage-realm", "manage-identity-providers", "manage-users", "view-users", "query-users"]
+    selected = [r for r in all_roles if r['name'] in targets]
+
+    # 创建租户管理员角色并绑定
+    kc.request("POST", f"/realms/{realm}/roles", json={"name": ADMIN_ROLE})
+    kc.request("POST", f"/realms/{realm}/roles/{ADMIN_ROLE}/composites", json=selected)
+
+
+def _create_admin_user(realm: str):
+    """5 & 6. 创建管理员用户并分配角色"""
+    # 创建用户
+    kc.request("POST", f"/realms/{realm}/users", json={"username": ADMIN_USER, "enabled": True})
+
+    # 查询 ID
+    users = kc.request("GET", f"/realms/{realm}/users", params={"username": ADMIN_USER}).json()
+    if not users: return
+    uid = users[0]["id"]
+
+    # 设置初始密码 (与 realm 同名)
+    kc.request("PUT", f"/realms/{realm}/users/{uid}/reset-password", json={
+        "type": "password", "value": realm, "temporary": True
     })
 
-    # 3. 编排权限
-    mgmt_clients = kc.request("GET", f"/realms/{realm}/clients", params={"clientId": "realm-management"}).json()
-    mgmt_uuid = mgmt_clients[0]['id']
+    # 绑定角色
+    role_obj = kc.request("GET", f"/realms/{realm}/roles/{ADMIN_ROLE}").json()
+    kc.request("POST", f"/realms/{realm}/users/{uid}/role-mappings/realm", json=[role_obj])
 
-    all_roles = kc.request("GET", f"/realms/{realm}/clients/{mgmt_uuid}/roles").json()
-    target_names = ["manage-realm", "manage-identity-providers", "manage-users", "view-users", "query-users"]
-    selected_roles = [r for r in all_roles if r['name'] in target_names]
 
-    # 4. 创建 tenant-admin 角色并绑定复合权限
-    admin_role_name = "tenant-admin"
-    kc.request("POST", f"/realms/{realm}/roles", json={"name": admin_role_name})
-    kc.request("POST", f"/realms/{realm}/roles/{admin_role_name}/composites", json=selected_roles)
-
-    # ### 关闭用户首次登录填写profile（keycloak 26.5版本）
-    # 5. 获取 First Broker Login 流程下的所有执行步骤
-    # 注意：Keycloak 26.5 推荐对 URL 中的空格进行编码
-    flow_alias = "first%20broker%20login"
-    target_path = f"/realms/{realm}/authentication/flows/{flow_alias}/executions"
-    executions = kc.request("GET", target_path).json()
-
-    # 6. 查找并禁用 "Review Profile"
+def _disable_review_profile(realm: str):
+    """7 & 8. 禁用 First Broker Login 的 Review Profile 步骤"""
+    path = f"/realms/{realm}/authentication/flows/first%20broker%20login/executions"
+    executions = kc.request("GET", path).json()
     for ex in executions:
-        # 在 26.5 中，displayName 依然是 "Review Profile"
-        # 或者通过 providerId "idp-review-profile" 匹配更稳妥
-        if ex.get('providerId') == 'idp-review-profile' or ex.get('displayName') == 'Review Profile':
+        if ex.get('providerId') == 'idp-review-profile':
             ex['requirement'] = 'DISABLED'
-            response = kc.request("PUT", target_path, json=ex)
-
-            if response.status_code == 204:
-                print(f"Successfully disabled Review Profile in {realm}")
+            kc.request("PUT", path, json=ex)
             break
+
+
+# --- 主 API 路由 ---
+
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=TenantResponse)
+def create_tenant(payload: TenantCreate, _=Depends(skip_master_realm)):
+    realm = payload.realm
+
+    # 编排执行流
+    _create_realm(realm, payload.displayName)
+    _create_client_with_mapper(realm)
+    _setup_admin_roles(realm)
+    _create_admin_user(realm)
+    _disable_review_profile(realm)
 
     return {
         "realm": realm,
         "id": realm,
-        "admin_role": admin_role_name
+        "admin_role": ADMIN_ROLE,
+        "admin_user": ADMIN_USER
     }
+
+
+@router.get("", response_model=List[dict])
+def list_tenants():
+    realms = kc.request("GET", "/realms").json()
+    return [r for r in realms if r['realm'].lower() != PROTECTED_REALM.lower()]
 
 
 @router.delete("/{realm_name}", dependencies=[Depends(skip_master_realm)])
