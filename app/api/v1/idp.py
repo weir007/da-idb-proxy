@@ -1,7 +1,11 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from flask import Response
+
 from app.core.keycloak import kc
 from app.api.v1.common import skip_master_realm
-from app.schemas.idp import IDPRequest
+from app.schemas.idp import IDPRequest, IdPMapperCreate, IdPMapperUpdate, IdPMapperResponse
 
 import os
 
@@ -136,3 +140,70 @@ def delete_idp_instance(realm: str, alias: str):
         raise HTTPException(status_code=404, detail=f"IDP instance '{alias}' not found in realm '{realm}'")
 
     return None  # 204 No Content 不需要返回 body
+
+
+# --- Protocol Mappers 管理 ---
+
+@router.get("/saml/instances/{alias}/mappers", response_model=List[IdPMapperResponse])
+def list_idp_mappers(realm: str, alias: str):
+    """获取指定 IDP 的所有 Mappers"""
+    path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers"
+    return kc.request("GET", path).json()
+
+
+@router.post("/saml/instances/{alias}/mappers", status_code=status.HTTP_201_CREATED, response_model=IdPMapperResponse)
+def create_idp_mapper(realm: str, alias: str, payload: IdPMapperCreate):
+    """创建 IDP Mapper"""
+    # 1. 转换模型并确保没有多余的 protocol 字段
+    mapper_data = payload.model_dump(exclude_none=True)
+    mapper_data["identityProviderAlias"] = alias
+
+    path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers"
+    res = kc.request("POST", path, json=mapper_data)
+
+    # Keycloak 26.x 成功返回 201，但新mapper的id在response header的location中，需要提取
+    if res.status_code == 201:
+        location = res.headers.get("Location")
+        if location:
+            new_id = location.split("/")[-1]
+            return {**mapper_data, "id": new_id}
+        return mapper_data
+
+    raise HTTPException(status_code=res.status_code, detail=res.text)
+
+
+@router.put("/saml/instances/{alias}/mappers/{mapper_id}", status_code=status.HTTP_204_NO_CONTENT)
+def update_idp_mapper(realm: str, alias: str, mapper_id: str, payload: IdPMapperUpdate):
+    """更新指定的 IDP Mapper"""
+    # 1. 先获取当前完整配置
+    base_path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers/{mapper_id}"
+    check = kc.request("GET", base_path)
+    if check.status_code != 200:
+        raise HTTPException(status_code=404, detail="Mapper not found")
+
+    current_data = check.json()
+
+    # 2. 合并更新 (仅覆盖传了值的字段)
+    update_dict = payload.model_dump(exclude_none=True)
+    for key, value in update_dict.items():
+        current_data[key] = value
+
+    # 3. 发送更新 (Keycloak 26.x PUT 返回 204 No Content)
+    res = kc.request("PUT", base_path, json=current_data)
+
+    if res.status_code == 204:
+        return Response(status.HTTP_204_NO_CONTENT)
+    raise HTTPException(status_code=res.status_code, detail=res.text)
+
+
+@router.delete("/saml/instances/{alias}/mappers/{mapper_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_idp_mapper(realm: str, alias: str, mapper_id: str):
+    """删除指定的 IDP Mapper"""
+    path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers/{mapper_id}"
+    res = kc.request("DELETE", path)
+
+    if res.status_code == 204:
+        return Response(status.HTTP_204_NO_CONTENT)
+    if res.status_code == 404:
+        raise HTTPException(status_code=404, detail="Mapper not found")
+    raise HTTPException(status_code=res.status_code, detail="Delete failed")
