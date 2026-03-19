@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.core.keycloak import kc
 from app.schemas.roles import RoleCreate, RoleUpdate, RoleResponse
@@ -62,6 +62,57 @@ def delete_role(realm: str, role_name: str):
     kc.request("DELETE", f"/realms/{realm}/roles/{role_name}")
     return {"msg": f"Role {role_name} deleted"}
 
+
+'''
+START: 问数客户要求使用uuid管理roles，需要订制by-id接口
+'''
+@router.get("/by-id/{role_id}")
+def get_role_by_id(realm: str, role_id: str):
+    """通过 UUID 获取角色详情"""
+    # 转发给 Keycloak 的标准 roles-by-id 路径
+    return kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}").json()
+
+
+@router.put("/by-id/{role_id}")
+def update_role_by_id(realm: str, role_id: str, payload: dict):
+    """
+    通过 UUID 修改角色信息（支持改名）
+    :param realm: "my-realm"
+    :param role_id: "uuid-xxx"
+    :param payload: {"name": "new-name", "description": "..."}
+    """
+    # 1. 先获取当前角色完整对象（防止覆盖掉隐藏属性）
+    check = kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}")
+    if check.status_code == 404:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    current_role = check.json()
+
+    # 2. 合并更新
+    current_role.update(payload)
+
+    # 3. 发送更新 (Keycloak 规范：roles-by-id 路径使用 PUT)
+    # 注意：即便改了 name，这个 id 依然有效
+    res = kc.request("PUT", f"/realms/{realm}/roles-by-id/{role_id}", json=current_role)
+
+    if res.status_code not in [200, 204]:
+        raise HTTPException(status_code=res.status_code, detail=res.text)
+
+    return {"msg": "Role updated", "id": role_id}
+
+
+@router.delete("/by-id/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_role_by_id(realm: str, role_id: str):
+    """通过 UUID 删除角色"""
+    res = kc.request("DELETE", f"/realms/{realm}/roles-by-id/{role_id}")
+
+    if res.status_code == 404:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    return None
+'''
+END: 问数客户要求使用uuid管理roles，需要订制by-id接口
+'''
 
 # --- Groups ---
 @router.get("/groups", response_model=List[GroupResponse])
