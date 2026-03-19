@@ -10,3 +10,6 @@ Data Agent身份认证服务
     KC_SCRIPT_MAPPER=script-data-agent-mapper.js
 4. 启动keycloak时附带参数 --features=scripts，示例（windows）：
     .\bin\kc.bat start-dev --features=scripts
+
+## REST 接口
+见doc/idb-proxy-api.json
