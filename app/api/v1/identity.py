@@ -66,14 +66,14 @@ def delete_role(realm: str, role_name: str):
 '''
 START: 问数客户要求使用uuid管理roles，需要订制by-id接口
 '''
-@router.get("/by-id/{role_id}")
+@router.get("/roles/by-id/{role_id}") #TODO: /roles/by-id
 def get_role_by_id(realm: str, role_id: str):
     """通过 UUID 获取角色详情"""
     # 转发给 Keycloak 的标准 roles-by-id 路径
     return kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}").json()
 
 
-@router.put("/by-id/{role_id}")
+@router.put("/roles/by-id/{role_id}")
 def update_role_by_id(realm: str, role_id: str, payload: dict):
     """
     通过 UUID 修改角色信息（支持改名）
@@ -101,7 +101,7 @@ def update_role_by_id(realm: str, role_id: str, payload: dict):
     return {"msg": "Role updated", "id": role_id}
 
 
-@router.delete("/by-id/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/roles/by-id/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_role_by_id(realm: str, role_id: str):
     """通过 UUID 删除角色"""
     res = kc.request("DELETE", f"/realms/{realm}/roles-by-id/{role_id}")
