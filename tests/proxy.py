@@ -140,11 +140,11 @@ class KeycloakWrapperTester:
             "description": "改名后 UUID 应该保持不变"
         }
         # 核心路径：by-id
-        res = self.session.put(f"{self.base_url}/{TEST_REALM}/by-id/{role_id}", json=update_payload)
+        res = self.session.put(f"{self.base_url}/{TEST_REALM}/roles/by-id/{role_id}", json=update_payload)
         self.log("3. 通过 UUID 修改角色名", res)
 
         # 4. 验证：再次通过 UUID 获取，核对 ID 和 Name
-        res = self.session.get(f"{self.base_url}/{TEST_REALM}/by-id/{role_id}")
+        res = self.session.get(f"{self.base_url}/{TEST_REALM}/roles/by-id/{role_id}")
         self.log("4. 再次获取角色信息验证稳定性", res)
         role_after = res.json()
 
