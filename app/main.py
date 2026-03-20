@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from app.core.keycloak import KeycloakError
-from app.api.v1 import tenants, idp, identity, common
+from app.api.v1 import tenants, idp, identity, common, token
 import os
 
 
@@ -20,6 +20,7 @@ app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(idp.router, prefix="/api/v1")
 app.include_router(identity.router, prefix="/api/v1")
 app.include_router(common.router, prefix="/api/v1")
+app.include_router(token.router, prefix="/api/v1")
 '''[仅供演示!!!]挂载静态文件服务 开始'''
 ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 app.mount("/ui", StaticFiles(directory=ui_path), name="ui")
