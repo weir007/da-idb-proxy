@@ -154,11 +154,11 @@ class KeycloakWrapperTester:
         print(f"   [SUCCESS] 验证通过：UUID 保持物理稳定，不受改名影响。")
 
         # 5. 删除角色 (通过 UUID 删除)
-        res = self.session.delete(f"{self.base_url}/{TEST_REALM}/by-id/{role_id}")
+        res = self.session.delete(f"{self.base_url}/{TEST_REALM}/roles/by-id/{role_id}")
         self.log("5. 通过 UUID 删除角色", res)
 
         # 6. 确认已物理删除
-        res = self.session.get(f"{self.base_url}/{TEST_REALM}/by-id/{role_id}")
+        res = self.session.get(f"{self.base_url}/{TEST_REALM}/roles/by-id/{role_id}")
         if res.status_code == 404:
             print("   [SUCCESS] 最终确认：角色已彻底从 Keycloak 中移除。")
         else:
