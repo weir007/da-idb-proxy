@@ -2,7 +2,7 @@ import os
 from typing import List
 from fastapi import APIRouter, status, Depends
 from app.core.keycloak import kc
-from app.schemas.realm import TenantCreate, TenantResponse
+from app.schemas.realm import TenantCreate, TenantResponse, TenantListResponse
 from app.api.v1.common import skip_master_realm
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
@@ -41,7 +41,11 @@ def _create_client_with_mapper(realm: str):
     # 例如: .../admin/realms/my-realm/clients/6f2d00a6-2256-4e21-a4d1-132507765afb
     if resp.status_code == 201:
         location = resp.headers.get("Location")
-        client_uuid = location.split("/")[-1]  # 提取最后一段 UUID
+        if location:
+            client_uuid = location.split("/")[-1]  # 提取最后一段 UUID
+        else:
+            print(f"Warning: No Location header in create client response")
+            client_uuid = None
 
         # B. 构造 Mapper 数组 (符合你找出来的 add-models 接口定义)
         mappers_payload = [
@@ -137,13 +141,13 @@ def create_tenant(payload: TenantCreate, _=Depends(skip_master_realm)):
     }
 
 
-@router.get("", response_model=List[dict])
+@router.get("", response_model=List[TenantListResponse])
 def list_tenants():
     realms = kc.request("GET", "/realms").json()
     return [r for r in realms if r['realm'].lower() != PROTECTED_REALM.lower()]
 
 
-@router.delete("/{realm_name}", dependencies=[Depends(skip_master_realm)])
+@router.delete("/{realm_name}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(skip_master_realm)])
 def delete_tenant(realm_name: str):
     kc.request("DELETE", f"/realms/{realm_name}")
-    return {"msg": f"Tenant {realm_name} deleted successfully"}
+    return None
