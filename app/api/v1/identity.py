@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.core.keycloak import kc
-from app.schemas.roles import RoleCreate, RoleUpdate, RoleResponse
+from app.schemas.roles import RoleCreate, RoleUpdate, RoleResponse, RoleUpdateByIdRequest
 from app.schemas.groups import GroupCreate, GroupUpdate, GroupResponse, GroupDetailResponse
+from app.schemas.users import UserResponse, UserContextResponse
 from app.api.v1.common import skip_master_realm
 
 
@@ -31,12 +32,13 @@ def list_roles(realm: str):
     ]
 
 
-@router.post("/roles")
+@router.post("/roles", status_code=status.HTTP_201_CREATED, response_model=RoleResponse)
 def create_role(realm: str, role: RoleCreate):
     # 转换模型为 JSON，排除空字段
     payload = role.model_dump(exclude_none=True)
     kc.request("POST", f"/realms/{realm}/roles", json=payload)
-    return {"msg": f"Role {role.name} created"}
+    # Return the created role by fetching it
+    return kc.request("GET", f"/realms/{realm}/roles/{role.name}").json()
 
 
 @router.get("/roles/{role_name}", response_model=RoleResponse)
@@ -45,22 +47,21 @@ def get_role(realm: str, role_name: str):
     return kc.request("GET", f"/realms/{realm}/roles/{role_name}").json()
 
 
-@router.put("/roles/{role_name}")
+@router.put("/roles/{role_name}", response_model=RoleResponse)
 def update_role(realm: str, role_name: str, role_update: RoleUpdate):
     """补全：更新角色"""
-    # 14.0 更新通常需要先拿原有数据进行合并，或者直接 PUT 覆盖
     current = kc.request("GET", f"/realms/{realm}/roles/{role_name}").json()
     update_data = role_update.model_dump(exclude_none=True)
     current.update(update_data)
     kc.request("PUT", f"/realms/{realm}/roles/{role_name}", json=current)
-    return {"msg": f"Role {role_name} updated"}
+    return kc.request("GET", f"/realms/{realm}/roles/{role_name}").json()
 
 
-@router.delete("/roles/{role_name}")
+@router.delete("/roles/{role_name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_role(realm: str, role_name: str):
     """补全：删除角色"""
     kc.request("DELETE", f"/realms/{realm}/roles/{role_name}")
-    return {"msg": f"Role {role_name} deleted"}
+    return None
 
 
 '''
@@ -73,13 +74,13 @@ def get_role_by_id(realm: str, role_id: str):
     return kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}").json()
 
 
-@router.put("/roles/by-id/{role_id}")
-def update_role_by_id(realm: str, role_id: str, payload: dict):
+@router.put("/roles/by-id/{role_id}", response_model=RoleResponse)
+def update_role_by_id(realm: str, role_id: str, payload: RoleUpdateByIdRequest):
     """
     通过 UUID 修改角色信息（支持改名）
     :param realm: "my-realm"
     :param role_id: "uuid-xxx"
-    :param payload: {"name": "new-name", "description": "..."}
+    :param payload: RoleUpdateByIdRequest with optional fields
     """
     # 1. 先获取当前角色完整对象（防止覆盖掉隐藏属性）
     check = kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}")
@@ -89,7 +90,8 @@ def update_role_by_id(realm: str, role_id: str, payload: dict):
     current_role = check.json()
 
     # 2. 合并更新
-    current_role.update(payload)
+    update_data = payload.model_dump(exclude_none=True)
+    current_role.update(update_data)
 
     # 3. 发送更新 (Keycloak 规范：roles-by-id 路径使用 PUT)
     # 注意：即便改了 name，这个 id 依然有效
@@ -98,7 +100,8 @@ def update_role_by_id(realm: str, role_id: str, payload: dict):
     if res.status_code not in [200, 204]:
         raise HTTPException(status_code=res.status_code, detail=res.text)
 
-    return {"msg": "Role updated", "id": role_id}
+    # Return the updated role
+    return kc.request("GET", f"/realms/{realm}/roles-by-id/{role_id}").json()
 
 
 @router.delete("/roles/by-id/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -159,43 +162,36 @@ def sync_group_roles(realm: str, group_id: str, target_role_names: List[str]):
         kc.request("POST", f"/realms/{realm}/groups/{group_id}/role-mappings/realm", json=roles_to_add)
 
 
-@router.post("/groups", status_code=201)
+@router.post("/groups", status_code=status.HTTP_201_CREATED, response_model=GroupResponse)
 def create_group(realm: str, group: GroupCreate):
-    # 1. 创建组基础信息 (只发 name 等基础字段)
     payload = group.model_dump(exclude={"users", "roles"}, exclude_none=True)
     resp = kc.request("POST", f"/realms/{realm}/groups", json=payload)
 
-    # Keycloak 26.5 POST 返回 201 且不带 Body，需要从 Location Header 或再次查询获取 ID
-    # 简单起见，这里假设你能通过名字查到刚创建的 ID
     new_group = next(g for g in kc.request("GET", f"/realms/{realm}/groups").json() if g['name'] == group.name)
     group_id = new_group['id']
 
-    # 2. 同步成员和角色
     if group.users is not None:
         sync_group_users(realm, group_id, group.users)
     if group.roles is not None:
         sync_group_roles(realm, group_id, group.roles)
 
-    return {"msg": f"Group {group.name} created with users/roles", "id": group_id}
+    return new_group
 
 
-@router.put("/groups/{group_id}")
+@router.put("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def update_group(realm: str, group_id: str, group_update: GroupUpdate):
-    # 1. 更新基础信息
     current = kc.request("GET", f"/realms/{realm}/groups/{group_id}").json()
     base_data = group_update.model_dump(exclude={"users", "roles"}, exclude_none=True)
     current.update(base_data)
     kc.request("PUT", f"/realms/{realm}/groups/{group_id}", json=current)
 
-    # 2. 同步成员 (如果传了该字段)
     if group_update.users is not None:
         sync_group_users(realm, group_id, group_update.users)
 
-    # 3. 同步角色 (如果传了该字段)
     if group_update.roles is not None:
         sync_group_roles(realm, group_id, group_update.roles)
 
-    return {"msg": f"Group {group_id} updated"}
+    return None
 
 
 @router.get("/groups/{group_id}", response_model=GroupDetailResponse)
@@ -227,20 +223,20 @@ def get_group_detail(realm: str, group_id: str):
     }
 
 
-@router.delete("/groups/{group_id}")
+@router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_group(realm: str, group_id: str):
     """删除组"""
     kc.request("DELETE", f"/realms/{realm}/groups/{group_id}")
-    return {"msg": f"Group {group_id} deleted"}
+    return None
 
 
 # --- Users ---
-@router.get("/users")
+@router.get("/users", response_model=List[UserResponse])
 def list_users(realm: str):
     return kc.request("GET", f"/realms/{realm}/users").json()
 
 
-@router.get("/users/{user_id}/details")
+@router.get("/users/{user_id}/details", response_model=UserContextResponse)
 def get_user_full_context(realm: str, user_id: str):
     """
     获取用户的完整上下文：所属组 + 拥有的角色 (已过滤内置角色)
