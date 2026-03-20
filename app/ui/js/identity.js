@@ -158,7 +158,7 @@ async function viewUser(userId) {
                 <li><strong>姓名:</strong> ${userDetails.firstName || ''} ${userDetails.lastName || ''}</li>
                 <li><strong>启用状态:</strong> ${userDetails.enabled ? '启用' : '禁用'}</li>
                 <li><strong>所属组:</strong> ${userDetails.groups && userDetails.groups.length > 0 ? userDetails.groups.map(g => g.name).join(', ') : '无'}</li>
-                <li><strong>所属角色:</strong> ${userDetails.roles && userDetails.roles.length > 0 ? userDetails.roles.join(', ') : '无'}</li>
+                <li><strong>所属角色:</strong> ${userDetails.roles && userDetails.roles.length > 0 ? userDetails.roles.map(r => r.name || r).join(', ') : '无'}</li>
             </ul>
         `;
         showModal('用户详情', content);
