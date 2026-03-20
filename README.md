@@ -12,4 +12,4 @@ Data Agent身份认证服务
     .\bin\kc.bat start-dev --features=scripts
 
 ## REST 接口
-见doc/idb-proxy-api.json
+见doc/idb-proxy-api.json和doc/api-description
