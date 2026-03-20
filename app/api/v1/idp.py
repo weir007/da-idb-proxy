@@ -1,7 +1,6 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
-from flask import Response
 
 from app.core.keycloak import kc
 from app.api.v1.common import skip_master_realm
@@ -81,7 +80,7 @@ def create_idp_instance(realm: str, payload: IDPRequest):
     }
 
     # 5. 发送请求
-    res = kc.request("POST", f"/realms/{realm}/identity-provider/instances", json=idp_data)
+    kc.request("POST", f"/realms/{realm}/identity-provider/instances", json=idp_data)
     return {"msg": "Created", "alias": alias}
 
 
@@ -192,7 +191,7 @@ def update_idp_mapper(realm: str, alias: str, mapper_id: str, payload: IdPMapper
     res = kc.request("PUT", base_path, json=current_data)
 
     if res.status_code == 204:
-        return Response(status.HTTP_204_NO_CONTENT)
+        return {"msg": f"Mapper {alias}({mapper_id}) modified"}
     raise HTTPException(status_code=res.status_code, detail=res.text)
 
 
@@ -203,7 +202,7 @@ def delete_idp_mapper(realm: str, alias: str, mapper_id: str):
     res = kc.request("DELETE", path)
 
     if res.status_code == 204:
-        return Response(status.HTTP_204_NO_CONTENT)
+        return {"msg": f"Mapper {alias}({mapper_id}) deleted"}
     if res.status_code == 404:
         raise HTTPException(status_code=404, detail="Mapper not found")
     raise HTTPException(status_code=res.status_code, detail="Delete failed")
