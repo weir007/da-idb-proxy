@@ -27,12 +27,16 @@ class GroupBase(BaseModel):
 
 
 class GroupCreate(GroupBase):
-    users: Optional[List[str]] = []  # 用户 ID 列表
-    roles: Optional[List[str]] = []  # 角色名称列表
+    users: Optional[List[str]] = []
+    roles: Optional[List[str]] = []
 
 
-class GroupUpdate(GroupCreate): # 继承 Create 以获得相同的字段
+class GroupUpdate(BaseModel):
     name: Optional[str] = None
+    path: Optional[str] = None
+    attributes: Optional[Dict[str, List[str]]] = None
+    users: Optional[List[str]] = []
+    roles: Optional[List[str]] = []
 
 
 class GroupResponse(GroupBase):
