@@ -4,25 +4,29 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 
 from app.core.keycloak import kc
 from app.api.v1.common import skip_master_realm
-from app.schemas.idp import IDPRequest, IdPMapperCreate, IdPMapperUpdate, IdPMapperResponse
+from app.schemas.idp import (
+    IDPRequest,
+    IdPMapperCreate,
+    IdPMapperUpdate,
+    IdPMapperResponse,
+    IDPInstanceResponse,
+    SAMLMetadataImportResponse
+)
 
 import os
 
 router = APIRouter(prefix="/{realm}/idp", tags=["IDP"], dependencies=[Depends(skip_master_realm)])
 
 
-@router.post("/saml/import")
+@router.post("/saml/import", response_model=SAMLMetadataImportResponse)
 async def import_saml_metadata(realm: str, file: UploadFile = File(...)):
-    """从 XML 文件导入 IDP 配置"""
     xml_content = await file.read()
 
-    # 构造 Keycloak 要求的 Form-Data 格式
     files = {
         'file': (file.filename, xml_content, file.content_type)
     }
     data = {"providerId": "saml"}
 
-    # 转发至 Keycloak 导入接口
     resp = kc.request(
         "POST",
         f"/realms/{realm}/identity-provider/import-config",
@@ -52,23 +56,17 @@ def _validate_saml_config(config: dict):
         )
 
 
-@router.post("/saml/instances", status_code=201)
+@router.post("/saml/instances", status_code=status.HTTP_201_CREATED, response_model=IDPInstanceResponse)
 def create_idp_instance(realm: str, payload: IDPRequest):
-    """创建 IDP 实例：限制单实例，强制注入环境变量 Alias"""
 
-    # 1. 限制一个 Realm 仅一个 (原有逻辑)
     existing = kc.request("GET", f"/realms/{realm}/identity-provider/instances").json()
     if len(existing) > 0:
         raise HTTPException(status_code=400, detail="Realm already has an IDP instance.")
 
-    # 2. 核心校验 (解决界面按钮置灰问题)
     _validate_saml_config(payload.config)
 
-    # 3. 获取环境变量别名 (原有逻辑)
     alias = os.getenv("DEFAULT_IDP_ALIAS", "da-saml-idp")
 
-    # 4. 构造完整 Payload
-    # 强制注入 providerId 和 alias
     idp_data = {
         "alias": alias,
         "displayName": payload.displayName or alias,
@@ -79,48 +77,38 @@ def create_idp_instance(realm: str, payload: IDPRequest):
         "config": payload.config
     }
 
-    # 5. 发送请求
     kc.request("POST", f"/realms/{realm}/identity-provider/instances", json=idp_data)
-    return {"msg": "Created", "alias": alias}
+    return kc.request("GET", f"/realms/{realm}/identity-provider/instances/{alias}").json()
 
 
-@router.put("/saml/instances")
+@router.put("/saml/instances", response_model=IDPInstanceResponse)
 def update_idp_instance(realm: str, payload: IDPRequest):
-    """更新 IDP 实例：先 GET 再合并 PUT"""
     alias = os.getenv("DEFAULT_IDP_ALIAS", "da-saml-idp")
 
-    # 1. 先获取旧配置 (原有逻辑：探测是否存在并获取完整对象)
     check = kc.request("GET", f"/realms/{realm}/identity-provider/instances/{alias}")
     if check.status_code == 404:
         raise HTTPException(status_code=404, detail=f"IDP {alias} not found.")
 
     current_full_data = check.json()
 
-    # 2. 合并配置
-    # 更新外层
     current_full_data["enabled"] = payload.enabled
     current_full_data["trustEmail"] = payload.trustEmail
     if payload.displayName:
         current_full_data["displayName"] = payload.displayName
 
-    # 更新内层 config (合并而不是替换，防止丢失原有证书等信息)
     current_full_data["config"].update(payload.config)
 
-    # 3. 校验合并后的结果 (解决界面修改后无法保存问题)
     _validate_saml_config(current_full_data["config"])
 
-    # 4. 强制 Alias 不可变
     current_full_data["alias"] = alias
 
-    # 5. 发送更新 (Keycloak 26.5 标准 PUT)
     kc.request("PUT", f"/realms/{realm}/identity-provider/instances/{alias}", json=current_full_data)
 
-    return {"msg": "Updated", "alias": alias}
+    return kc.request("GET", f"/realms/{realm}/identity-provider/instances/{alias}").json()
 
 
-@router.get("/saml/instances")
+@router.get("/saml/instances", response_model=List[IDPInstanceResponse])
 def list_idp_instances(realm: str):
-    """获取该 Realm 下所有的 IDP 实例列表"""
     return kc.request("GET", f"/realms/{realm}/identity-provider/instances").json()
 
 
@@ -173,8 +161,6 @@ def create_idp_mapper(realm: str, alias: str, payload: IdPMapperCreate):
 
 @router.put("/saml/instances/{alias}/mappers/{mapper_id}", status_code=status.HTTP_204_NO_CONTENT)
 def update_idp_mapper(realm: str, alias: str, mapper_id: str, payload: IdPMapperUpdate):
-    """更新指定的 IDP Mapper"""
-    # 1. 先获取当前完整配置
     base_path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers/{mapper_id}"
     check = kc.request("GET", base_path)
     if check.status_code != 200:
@@ -182,27 +168,26 @@ def update_idp_mapper(realm: str, alias: str, mapper_id: str, payload: IdPMapper
 
     current_data = check.json()
 
-    # 2. 合并更新 (仅覆盖传了值的字段)
     update_dict = payload.model_dump(exclude_none=True)
     for key, value in update_dict.items():
         current_data[key] = value
 
-    # 3. 发送更新 (Keycloak 26.x PUT 返回 204 No Content)
     res = kc.request("PUT", base_path, json=current_data)
 
-    if res.status_code == 204:
-        return {"msg": f"Mapper {alias}({mapper_id}) modified"}
-    raise HTTPException(status_code=res.status_code, detail=res.text)
+    if res.status_code != 204:
+        raise HTTPException(status_code=res.status_code, detail=res.text)
+
+    return None
 
 
 @router.delete("/saml/instances/{alias}/mappers/{mapper_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_idp_mapper(realm: str, alias: str, mapper_id: str):
-    """删除指定的 IDP Mapper"""
     path = f"/realms/{realm}/identity-provider/instances/{alias}/mappers/{mapper_id}"
     res = kc.request("DELETE", path)
 
-    if res.status_code == 204:
-        return {"msg": f"Mapper {alias}({mapper_id}) deleted"}
     if res.status_code == 404:
         raise HTTPException(status_code=404, detail="Mapper not found")
-    raise HTTPException(status_code=res.status_code, detail="Delete failed")
+    if res.status_code != 204:
+        raise HTTPException(status_code=res.status_code, detail="Delete failed")
+
+    return None
