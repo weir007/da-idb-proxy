@@ -21,3 +21,11 @@ class RoleResponse(RoleBase):
     name: str
     clientRole: bool
     containerId: Optional[str] = None
+
+
+class RoleUpdateByIdRequest(BaseModel):
+    """Request body for updating a role by UUID (supports renaming)"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    attributes: Optional[Dict[str, List[str]]] = None
+    composite: Optional[bool] = None
