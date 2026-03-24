@@ -237,7 +237,19 @@ curl -X DELETE http://localhost:8000/api/v1/tenants/my-tenant
     },
     "composite": false,
     "clientRole": false,
-    "containerId": null
+    "containerId": null,
+    "policy": {
+      "id": "documents-allow",
+      "tenant_id": "my-tenant",
+      "rules": [
+        {
+          "resource": "documents",
+          "effect": "allow"
+        }
+      ],
+      "created_at": "2026-03-19T12:00:00",
+      "updated_at": "2026-03-19T12:00:00"
+    }
   },
   {
     "id": "uuid-here-2",
@@ -261,6 +273,7 @@ curl -X DELETE http://localhost:8000/api/v1/tenants/my-tenant
 | composite | boolean | 是否为复合角色（包含其他角色） |
 | clientRole | boolean | 是否为客户端角色（应始终为 false） |
 | containerId | string | 容器 ID（Realm 角色为 null） |
+| policy | object | **可选** - 绑定的策略信息（OPA 服务提供） |
 
 **示例 cURL**:
 ```bash
@@ -271,7 +284,7 @@ curl http://localhost:8000/api/v1/my-tenant/roles
 
 #### 创建角色
 
-创建一个新的 Realm 级别角色。
+创建一个新的 Realm 级别角色。可选择性地为角色绑定策略。
 
 **接口**: `POST /{realm}/roles`
 
@@ -289,7 +302,8 @@ curl http://localhost:8000/api/v1/my-tenant/roles
     "permissions": ["read", "write"],
     "level": ["standard"]
   },
-  "composite": false
+  "composite": false,
+  "policy_id": "documents-allow"
 }
 ```
 
@@ -300,6 +314,7 @@ curl http://localhost:8000/api/v1/my-tenant/roles
 | description | string | 否 | 角色描述 |
 | attributes | object | 否 | 自定义属性（键值为字符串数组） |
 | composite | boolean | 否 | 是否为复合角色（默认: false） |
+| policy_id | string | 否 | **可选** - 要绑定的策略 ID（OPA 服务） |
 
 **响应 (201 Created)**:
 ```json
@@ -313,7 +328,19 @@ curl http://localhost:8000/api/v1/my-tenant/roles
   },
   "composite": false,
   "clientRole": false,
-  "containerId": null
+  "containerId": null,
+  "policy": {
+    "id": "documents-allow",
+    "tenant_id": "my-tenant",
+    "rules": [
+      {
+        "resource": "documents",
+        "effect": "allow"
+      }
+    ],
+    "created_at": "2026-03-19T12:00:00",
+    "updated_at": "2026-03-19T12:00:00"
+  }
 }
 ```
 
@@ -348,7 +375,7 @@ curl -X POST http://localhost:8000/api/v1/my-tenant/roles \
 
 #### 更新角色
 
-通过角色名称更新角色信息。支持部分更新，仅传入需要修改的字段。
+通过角色名称更新角色信息。支持部分更新，仅传入需要修改的字段。可选择性地更新或取消绑定策略。
 
 **接口**: `PUT /{realm}/roles/{role_name}`
 
@@ -366,13 +393,22 @@ curl -X POST http://localhost:8000/api/v1/my-tenant/roles \
   "attributes": {
     "updated_field": ["new_value"]
   },
-  "composite": false
+  "composite": false,
+  "policy_id": "documents-read-only"
 }
 ```
 
 **请求字段**: 所有字段均为可选
 
-**响应 (200 OK)**: 返回更新后的完整角色对象
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| name | string | 角色名称 |
+| description | string | 角色描述 |
+| attributes | object | 自定义属性 |
+| composite | boolean | 是否为复合角色 |
+| policy_id | string | **可选** - 新的策略 ID（传 null 表示取消绑定） |
+
+**响应 (200 OK)**: 返回更新后的完整角色对象（包括策略信息）
 
 ---
 
@@ -410,7 +446,7 @@ curl -X POST http://localhost:8000/api/v1/my-tenant/roles \
 
 #### 通过 UUID 更新角色
 
-通过角色 UUID 更新角色信息。此接口支持角色重命名。
+通过角色 UUID 更新角色信息。此接口支持角色重命名。可选择性地更新或取消绑定策略。
 
 **接口**: `PUT /{realm}/roles/by-id/{role_id}`
 
@@ -428,13 +464,22 @@ curl -X POST http://localhost:8000/api/v1/my-tenant/roles \
   "attributes": {
     "new_attribute": ["value"]
   },
-  "composite": false
+  "composite": false,
+  "policy_id": "documents-read-only"
 }
 ```
 
 **请求字段**: 所有字段均为可选
 
-**响应 (200 OK)**: 返回更新后的完整角色对象
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| name | string | 角色名称 |
+| description | string | 角色描述 |
+| attributes | object | 自定义属性 |
+| composite | boolean | 是否为复合角色 |
+| policy_id | string | **可选** - 新的策略 ID（传 null 表示取消绑定） |
+
+**响应 (200 OK)**: 返回更新后的完整角色对象（包括策略信息）
 
 ---
 
@@ -453,6 +498,23 @@ curl -X POST http://localhost:8000/api/v1/my-tenant/roles \
 **响应 (204 No Content)**: 无响应体
 
 ---
+
+**关于策略绑定**:
+
+角色管理接口支持与 OPA (Open Policy Agent) 服务集成，为角色绑定策略：
+
+1. **每个角色最多绑定一条策略**
+2. **事务可靠性**: 创建/更新角色时，如果 OPA 策略绑定失败，会自动回滚 Keycloak 角色操作
+3. **查询返回策略信息**: 获取角色列表或详情时，会自动包含绑定的策略信息（如有）
+4. **tenant_id 映射**: OPA 服务使用的是 URL 路径中的 realm 作为 tenant_id，无需在请求 body 中额外传递
+
+**OPA 服务配置**:
+
+需要在 `.env` 文件中配置 OPA 服务地址：
+
+```bash
+OPA_BASE_URL=http://localhost:8181
+```
 
 ### 组管理
 
@@ -1053,7 +1115,7 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 
 ### 查询 IDP Mapper 列表
 
-获取指定 IDP 实例的所有协议映射器（Mapper）列表。
+获取指定 IDP 实例的所有协议映射器（Mapper）列表（简化版）。
 
 **接口**: `GET /{realm}/idp/saml/instances/{alias}/mappers`
 
@@ -1067,25 +1129,18 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 ```json
 [
   {
-    "id": "mapper-uuid",
-    "name": "Group Mapper",
-    "identityProviderAlias": "da-saml-idp",
-    "identityProviderMapper": "saml-group-idp-mapper",
-    "config": {
-      "group": "Engineering",
-      "attribute.name": "groups"
-    }
+    "id": "mapper-uuid-1",
+    "name": "Department Mapper",
+    "attributeKey": "department",
+    "attributeValue": "department",
+    "friendlyName": "Department"
   },
   {
     "id": "mapper-uuid-2",
-    "name": "Attribute Mapper",
-    "identityProviderAlias": "da-saml-idp",
-    "identityProviderMapper": "saml-user-attribute-mapper",
-    "config": {
-      "user.attribute": "department",
-      "attribute.name": "department",
-      "attribute.friendly.name": "Department"
-    }
+    "name": "Email Mapper",
+    "attributeKey": "email",
+    "attributeValue": "email",
+    "friendlyName": null
   }
 ]
 ```
@@ -1095,22 +1150,23 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 |------|------|------|
 | id | string | Mapper UUID |
 | name | string | Mapper 名称 |
-| identityProviderAlias | string | 所属 IDP 别名 |
-| identityProviderMapper | string | Mapper 类型 |
-| config | object | Mapper 配置（键值均为字符串） |
+| attributeKey | string | Remote Attribute（SAML 属性名，对应 Keycloak config 中的 user.attribute） |
+| attributeValue | string | Local Attribute（Keycloak 用户属性名，对应 Keycloak config 中的 attribute.name） |
+| friendlyName | string \| null | Friendly Name（可选，对应 Keycloak config 中的 friendly.name） |
 
-**常见 Mapper 类型**:
-| 类型 | 说明 |
-|------|------|
-| saml-user-attribute-mapper | 将 SAML 属性映射到用户属性 |
-| saml-group-idp-mapper | 将 SAML 组映射到 Keycloak 组 |
-| saml-role-idp-mapper | 将 SAML 角色映射到 Keycloak 角色 |
+**注意**:
+- 此接口返回的是简化版 Mapper 信息，仅包含前端需要显示的核心字段
+- 实际 Keycloak API 中的其他字段（如 identityProviderMapper、config.syncMode 等）在代理层已固定，无需显示
+- 固定配置：<br>
+  - Mapper 类型: `saml-user-attribute-idp-mapper`（Attribute Importer）<br>
+  - Sync Mode: `INHERIT`<br>
+  - Name Format: `ATTRIBUTE_FORMAT_BASIC` |
 
 ---
 
 ### 创建 IDP Mapper
 
-为指定 IDP 实例创建新的协议映射器。
+为指定 IDP 实例创建新的协议映射器（简化版）。
 
 **接口**: `POST /{realm}/idp/saml/instances/{alias}/mappers`
 
@@ -1124,13 +1180,9 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 ```json
 {
   "name": "Department Mapper",
-  "identityProviderMapper": "saml-user-attribute-mapper",
-  "config": {
-    "user.attribute": "department",
-    "attribute.name": "department",
-    "attribute.friendly.name": "Department",
-    "syncMode": "IMPORT"
-  }
+  "attributeKey": "department",
+  "attributeValue": "department",
+  "friendlyName": "Department"
 }
 ```
 
@@ -1138,28 +1190,34 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|--------|------|
 | name | string | 是 | Mapper 名称 |
-| identityProviderMapper | string | 是 | Mapper 类型 |
-| config | object | 是 | Mapper 配置（所有值必须为字符串） |
+| attributeKey | string | 是 | Remote Attribute（SAML 属性名，将被映射到 Keycloak 用户属性） |
+| attributeValue | string | 是 | Local Attribute（Keycloak 用户属性名） |
+| friendlyName | string | 否 | Friendly Name（可选的显示名称） |
 
 **响应 (201 Created)**:
 ```json
 {
   "id": "new-mapper-uuid",
   "name": "Department Mapper",
-  "identityProviderAlias": "da-saml-idp",
-  "identityProviderMapper": "saml-user-attribute-mapper",
-  "config": {
-    "user.attribute": "department",
-    "attribute.name": "department"
-  }
+  "attributeKey": "department",
+  "attributeValue": "department",
+  "friendlyName": "Department"
 }
 ```
+
+**说明**:
+- 此接口为简化版本，仅接受最基本的映射参数
+- 下层 Mapper 类型固定为 `saml-user-attribute-idp-mapper`（Attribute Importer）
+- 以下配置在代理层自动固定，无需前端传递：<br>
+  - `syncMode`: `INHERIT`（同步模式继承）<br>
+  - `nameFormat`: `ATTRIBUTE_FORMAT_BASIC`（名称格式：基础属性格式）<br>
+  - 所有 Mapper 均为属性导入类型，用于从 SAML IDP 导入用户属性到 Keycloak |
 
 ---
 
 ### 更新 IDP Mapper
 
-更新指定 IDP Mapper 的配置。
+更新指定 IDP Mapper 的配置（简化版）。
 
 **接口**: `PUT /{realm}/idp/saml/instances/{alias}/mappers/{mapper_id}`
 
@@ -1174,16 +1232,26 @@ curl -X DELETE http://localhost:8000/api/v1/my-tenant/idp/saml/instances/da-saml
 ```json
 {
   "name": "Updated Department Mapper",
-  "config": {
-    "user.attribute": "new_department",
-    "attribute.friendly.name": "New Department Name"
-  }
+  "attributeKey": "new_department",
+  "attributeValue": "new_department_field",
+  "friendlyName": "New Department Name"
 }
 ```
 
-**请求字段**: 所有字段均为可选
+**请求字段**:
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|--------|------|
+| name | string | 否 | Mapper 新名称 |
+| attributeKey | string | 否 | 新的 Remote Attribute（SAML 属性名） |
+| attributeValue | string | 否 | 新的 Local Attribute（Keycloak 用户属性名） |
+| friendlyName | string | 否 | 新的 Friendly Name（可选） |
 
 **响应 (204 No Content)**: 无响应体
+
+**说明**:
+- 此接口为简化版本，仅支持更新核心映射参数
+- 未提供的字段保持原值不变
+- Mapper 的固定配置（类型、syncMode、nameFormat）不可通过此接口修改 |
 
 ---
 
@@ -1235,9 +1303,7 @@ Token 管理 API 处理 OIDC 认证流程中的 Token 交换。
   "expires_in": 300,
   "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLXV1aWQiLCJyZWFsbV9pZCI6Im15LXRlbmFudCJ9.signature",
   "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLXV1aWQiLCJnaXZlbl9uYW1lIjoiSm9obiIsInJlYWxtIjoibXktdGVuYW50In0.signature",
-  "scope": "openid profile email",
-  "realm_id": "my-tenant",
-  "role_ids": ["role-uuid-1", "role-uuid-2", "role-uuid-3"]
+  "scope": "openid profile email"
 }
 ```
 
@@ -1250,12 +1316,10 @@ Token 管理 API 处理 OIDC 认证流程中的 Token 交换。
 | refresh_token | string | 刷新令牌 |
 | id_token | string | ID 令牌（包含用户身份信息） |
 | scope | string | 授权范围 |
-| **realm_id** | string | **租户 ID（自定义字段）** |
-| **role_ids** | array | **用户角色 UUID 列表（自定义字段）** |
 
 **注意**:
-- 此接口代理了 Keycloak 的 OAuth2 Token Endpoint
-- `realm_id` 和 `role_ids` 是代理服务添加的自定义字段，帮助前端快速识别用户所属租户和角色
+- 此接口代理了 Keycloak 的 OAuth2 Token Endpoint，返回标准 OAuth2.0 响应
+- 如需获取用户角色信息，请调用 `GET /{realm}/users/{user_id}/details` 接口
 - 实际 Token 交换的参数和响应与 Keycloak 标准 OAuth2 实现完全兼容
 
 ---
@@ -1272,8 +1336,19 @@ Token 管理 API 处理 OIDC 认证流程中的 Token 交换。
 
 **响应 (200 OK)**:
 ```json
-{}
+{
+  "status": "healthy",
+  "code": 200,
+  "timestamp": "2026-03-24T10:30:00.000000"
+}
 ```
+
+**响应字段**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| status | string | 服务状态，固定为 "healthy" |
+| code | number | HTTP 状态码 |
+| timestamp | string | UTC 时间戳（ISO 8601 格式） |
 
 **示例 cURL**:
 ```bash
@@ -1333,12 +1408,14 @@ const response = await fetch('/api/v1/my-tenant/idp/saml/import', {
 
 | 环境变量 | 说明 | 默认值 |
 |-----------|------|--------|
+| `KC_URL` | Keycloak 服务地址 | `http://localhost:8080` |
 | `KC_REALM` | 受保护的租户名称 | `master` |
 | `KC_NEW_CLIENT_ID` | 为新租户创建的默认 Client ID | `data-agent` |
 | `KC_SCRIPT_MAPPER` | Script Mapper 提供者名称 | `Data Agent Mapper` |
 | `DEFAULT_TENANT_ADMIN_ROLE` | 默认租户管理员角色名称 | `tenant-admin` |
 | `DEFAULT_TENANT_ADMIN_NAME` | 默认租户管理员用户名 | `tenant-admin` |
 | `DEFAULT_IDP_ALIAS` | 默认 IDP 别名 | `da-saml-idp` |
+| `OPA_BASE_URL` | OPA (Open Policy Agent) 服务地址 | `http://localhost:8181` |
 
 ---
 
